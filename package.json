@@ -30,6 +30,9 @@
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
+  "bin": {
+    "dsh-asset-library-mcp": "./mcp-server.js"
+  },
   "files": [
     "index.js",
     "client.js",
@@ -38,7 +41,8 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "node test/smoke-host.mjs"

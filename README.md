@@ -53,13 +53,39 @@ asset_library {action:"export", ids:["ast_xxx","ast_yyy"], destination:"D:\\MyGa
 
 ## 安装
 
-- 在 Harness 的插件管理里按 git 地址添加：`git+https://github.com/longcheng4855-a11y/dsh-asset-library.git`；
-- 或者把仓库克隆/下载到任意目录，在插件管理里选择该目录安装；
+- **从链接安装（推荐）**：在 Harness 插件管理的「从链接安装 / 添加插件」里粘贴：
+
+  ```text
+  git+https://github.com/longcheng4855-a11y/dsh-asset-library.git
+  ```
+
+  也可以直接用仓库地址 `https://github.com/longcheng4855-a11y/dsh-asset-library`。
+- **本地目录安装**：把仓库克隆/下载到任意目录，在插件管理里选择该目录。
+- 安装时 Harness 会从 GitHub 拉取代码；首次启动 MCP 时 `npx` 也会拉取同一个仓库（之后走缓存）。
 - 安装后左侧菜单出现「资产库」，首次打开先选择素材库文件夹。
 
 ## MCP 行
 
-`cordis.patch.yml` 里的 `asset-library-mcp` 行通过 `@deepseek-ai/dsh-mcp-client` 以 stdio 启动本包的 `mcp-server.js`，参数写的是本机绝对路径。若把本包移动到别的位置，请同步修改该行的 `args`。
+`cordis.patch.yml` 里的 `asset-library-mcp` 行通过 `@deepseek-ai/dsh-mcp-client` 启动本包的 MCP 服务。为了让任何机器都能用，它用 `npx` 从公开仓库取：
+
+```yaml
+command: npx
+args: ['-y', 'github:longcheng4855-a11y/dsh-asset-library', 'dsh-asset-library-mcp']
+```
+
+- 原生工具 `asset_library` 不依赖 MCP；离线时只有 `mcp__assetlib__*` 不可用。
+- 想用本地已安装的副本（启动更快、不联网），在 profile 的 `cordis.patch.yml` 里覆盖同一行：
+
+```yaml
+- id: asset-library-mcp
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    transport: stdio
+    serverName: assetlib
+    command: node
+    args: ['<你的插件目录>/mcp-server.js']
+```
+
 
 ## 权限与隐私
 

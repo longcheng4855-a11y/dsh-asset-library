@@ -1,14 +1,20 @@
 - insert:
     - id: asset-library
       name: dsh-asset-library
+    # MCP face. It is fetched from the public repository with npx, so this row
+    # works on any machine without editing a local path. The native
+    # `asset_library` tool does not depend on it; if the machine is offline the
+    # MCP tools stay unavailable and the rest of the plugin keeps working.
     - id: asset-library-mcp
       name: '@deepseek-ai/dsh-mcp-client'
       config:
         transport: stdio
         serverName: assetlib
-        command: node
+        command: npx
         args:
-          - 'C:/Users/uersA/Desktop/plug-ins/zichanguanli/mcp-server.js'
+          - '-y'
+          - 'github:longcheng4855-a11y/dsh-asset-library'
+          - 'dsh-asset-library-mcp'
         toolCallTimeoutMs: 30000
         failOnStartupError: false
         reconnect:
