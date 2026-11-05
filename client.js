@@ -58,6 +58,9 @@ window.__ModuleLoader__.load({
         checkPython: '检测 Python 环境',
         pythonOk: 'Python 可用：{cmd}',
         pythonMissing: '没有找到可用的 Python，将自动改用浏览器识别',
+        continueNaming: '继续命名下一批',
+        regenerateBatch: '重新生成这一批',
+        namedRange: '已命名 {start}–{end} / 共 {total} 个',
         pythonChecking: '正在检测 Python…',
         pythonSetup: '创建 Python 环境',
         pythonSetupConfirm: '会在 Harness 数据目录下创建一个独立 Python 环境（不影响系统）：联网下载 numpy、Pillow；选完整安装时再装 OpenCV。约 60–80MB，1–3 分钟。',
@@ -147,7 +150,7 @@ window.__ModuleLoader__.load({
         usageBadge: 'tokens',
         usageHint: '本次 AI 识别消耗的输入/输出 token',
         usageEmpty: '还没有调用过模型',
-        namingCapHint: '切图较多（{n} 个）：AI 命名每次处理前 {cap} 个，其余保留编号，可手动改名',
+        namingCapHint: '切图较多（{n} 个）：每次 AI 命名处理 {cap} 个，命名后可继续下一批或重新生成这一批',
         duplicate: '已在素材库中',
         duplicateHint: '这张图片已经导入过，未重复入库：',
         ready: '待确认',
@@ -241,6 +244,9 @@ window.__ModuleLoader__.load({
         checkPython: 'Check Python',
         pythonOk: 'Python available: {cmd}',
         pythonMissing: 'No usable Python found; the browser detector will be used',
+        continueNaming: 'Name next batch',
+        regenerateBatch: 'Regenerate this batch',
+        namedRange: 'Named {start}–{end} of {total}',
         pythonChecking: 'Checking Python…',
         pythonSetup: 'Create Python env',
         pythonSetupConfirm: 'Creates a private Python environment under the Harness data folder (your system Python stays untouched): downloads numpy and Pillow, plus OpenCV for the full install. About 60–80MB, 1–3 minutes.',
@@ -330,7 +336,7 @@ window.__ModuleLoader__.load({
         usageBadge: 'tokens',
         usageHint: 'Input/output tokens spent by this AI pass',
         usageEmpty: 'No model calls yet',
-        namingCapHint: 'Many pieces ({n}): AI naming handles the first {cap} per run; the rest keep their numbers',
+        namingCapHint: 'Many pieces ({n}): each AI run names {cap}; afterwards you can continue with the next batch or regenerate this one',
         duplicate: 'Already in the library',
         duplicateHint: 'This image was imported before, so it was skipped:',
         ready: 'Review',
@@ -1893,9 +1899,16 @@ window.__ModuleLoader__.load({
       /* 2. AI naming for crops that already exist (names, categories, tags, notes).
          Dense sheets are capped per run so one click does not fire hundreds of
          model calls; the rest keep their numbered names. */
-      function describe(key, stageId, pieces) {
-        patchEntry(key, { status: 'describing', error: '' })
-        var target = pieces.slice(0, NAMING_CAP)
+      function describe(key, stageId, pieces, start) {
+        var from = Math.max(0, Math.min(Math.floor(Number(start) || 0), pieces.length))
+        var to = Math.min(from + NAMING_CAP, pieces.length)
+        if (to <= from) return Promise.resolve()
+        patchEntry(key, {
+          status: 'describing',
+          error: '',
+          progress: from + 1 + '-' + to + ' / ' + pieces.length,
+        })
+        var target = pieces.slice(from, to)
         var payload = target.map(function (piece) {
           return {
             data: piece.data,
@@ -1905,12 +1918,12 @@ window.__ModuleLoader__.load({
             bbox: piece.bbox,
           }
         })
-        return postJson('/describe', { stageId: stageId, pieces: payload })
+        return postJson('/describe', { stageId: stageId, start: from, pieces: payload })
           .then(function (result) {
             var annotations = result.pieces || []
             var merged = pieces.map(function (piece, index) {
-              if (index >= target.length) return piece
-              var annotation = annotations[index] || {}
+              if (index < from || index >= to) return piece
+              var annotation = annotations[index - from] || {}
               return Object.assign({}, piece, {
                 id: annotation.pieceId || piece.id,
                 url: annotation.url || piece.url,
@@ -1923,6 +1936,8 @@ window.__ModuleLoader__.load({
             var patch = {
               status: 'ready',
               pieces: merged,
+              namedStart: from,
+              namedEnd: to,
               category: result.category || '其他',
               tagsText: (result.tags || []).join(' '),
               note: result.note || '',
@@ -1936,7 +1951,13 @@ window.__ModuleLoader__.load({
             patchEntry(key, patch)
           })
           .catch(function (error) {
-            patchEntry(key, { status: 'ready', error: failure(error) + t.nameFailedHint, progress: '' })
+            patchEntry(key, {
+              status: 'ready',
+              error: failure(error) + t.nameFailedHint,
+              progress: '',
+              namedStart: from,
+              namedEnd: to,
+            })
           })
       }
 
@@ -2373,7 +2394,12 @@ window.__ModuleLoader__.load({
         if (entry.status === 'error') return { text: t.failed, busy: false }
         if (entry.status === 'duplicate') return { text: t.duplicate, busy: false }
         if (entry.status === 'review') return { text: t.review + (entry.pieces && entry.pieces.length ? ' · ' + entry.pieces.length : ''), busy: false }
-        return { text: t.named, busy: false }
+        return {
+          text:
+            t.named +
+            (entry.namedEnd ? ' ' + entry.namedEnd + '/' + ((entry.pieces && entry.pieces.length) || 0) : ''),
+          busy: false,
+        }
       }
 
       function pieceRow(entry, piece) {
@@ -2694,19 +2720,40 @@ window.__ModuleLoader__.load({
                           },
                           t.commitWhole,
                         ),
-                        pieces.length > 0
+                        pieces.length > 0 && (entry.namedEnd || 0) < pieces.length
+                          ? h(
+                              Button,
+                              {
+                                primary: true,
+                                onClick: function () {
+                                  describe(entry.key, entry.stageId, pieces, entry.namedEnd || 0)
+                                },
+                              },
+                              t.continueNaming +
+                                ' (' +
+                                Math.min(pieces.length - (entry.namedEnd || 0), NAMING_CAP) +
+                                ')',
+                            )
+                          : null,
+                        pieces.length > 0 && (entry.namedStart || 0) < (entry.namedEnd || 0)
                           ? h(
                               Button,
                               {
                                 onClick: function () {
-                                  describe(entry.key, entry.stageId, pieces)
+                                  describe(entry.key, entry.stageId, pieces, entry.namedStart || 0)
                                 },
                               },
-                              t.renameAi +
-                                ' (' +
-                                Math.min(pieces.length, NAMING_CAP) +
-                                (pieces.length > NAMING_CAP ? '/' + pieces.length : '') +
-                                ')',
+                              t.regenerateBatch,
+                            )
+                          : null,
+                        pieces.length > 0 && (entry.namedStart || 0) < (entry.namedEnd || 0)
+                          ? h(
+                              'span',
+                              { className: 'al-muted' },
+                              t.namedRange
+                                .replace('{start}', String((entry.namedStart || 0) + 1))
+                                .replace('{end}', String(entry.namedEnd || 0))
+                                .replace('{total}', String(pieces.length)),
                             )
                           : null,
                       )

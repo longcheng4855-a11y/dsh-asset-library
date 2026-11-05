@@ -265,6 +265,15 @@ check(
   'batch describe',
   many.status + ' pieces=' + (many.json.pieces ? many.json.pieces.length : JSON.stringify(many.json)) + ' modelCalls=' + describeCalls,
 )
+const secondBatch = await call('/asset-library/describe', 'POST', {
+  stageId: stagedMany.json.stageId,
+  start: 8,
+  pieces: manyPieces.slice(8, 10),
+})
+check(
+  'describe offset',
+  secondBatch.status + ' firstId=' + (secondBatch.json.pieces ? secondBatch.json.pieces[0].pieceId : JSON.stringify(secondBatch.json)),
+)
 
 const createdCat = await call('/asset-library/category', 'POST', { action: 'create', path: '新分类/子类' })
 const afterCreate = await call('/asset-library/state', 'GET')

@@ -24,7 +24,7 @@ import { detectObjects, describePieces, MAX_OBJECTS } from './lib/analyze.js'
 export const name = 'asset-library'
 export const inject = ['webServer']
 
-const VERSION = '0.9.2'
+const VERSION = '0.9.3'
 const SEGMENT_SCRIPT = fileURLToPath(new URL('./lib/segment.py', import.meta.url))
 const ROUTE = '/asset-library'
 const SMALL_BODY = 128 * 1024
@@ -1027,13 +1027,14 @@ function describeHandler(runtime) {
         return
       }
       const { dir, meta } = await readStage(config.libraryPath, body.stageId)
+      const offset = Math.max(0, Math.floor(Number(body.start) || 0))
       const pieces = []
       for (let index = 0; index < body.pieces.length; index += 1) {
         const piece = body.pieces[index]
         if (!piece || typeof piece !== 'object') continue
         const mediaType = piece.mediaType === 'image/png' ? 'image/png' : 'image/jpeg'
         const bytes = store.decodeBase64(piece.data, MAX_SEGMENT_BYTES)
-        const pieceId = `p${index + 1}`
+        const pieceId = `p${offset + index + 1}`
         const extension = mediaType === 'image/png' ? '.png' : '.jpg'
         await fsp.writeFile(path.join(dir, `${pieceId}${extension}`), bytes)
         pieces.push({
@@ -1044,17 +1045,6 @@ function describeHandler(runtime) {
           h: Math.max(1, Math.round(Number(piece.h) || 0)),
           bbox: Array.isArray(piece.bbox) && piece.bbox.length === 4 ? piece.bbox.map(Number) : null,
         })
-      }
-      /* Drop piece files the new set no longer references. */
-      try {
-        const kept = new Set(pieces.map((piece) => piece.pieceId))
-        const files = await fsp.readdir(dir)
-        for (const file of files) {
-          if (!/^p\d+\.(png|jpg)$/.test(file)) continue
-          if (!kept.has(file.replace(/\.[^.]+$/, ''))) await fsp.unlink(path.join(dir, file))
-        }
-      } catch {
-        /* best effort */
       }
       const state = await store.loadLibrary(config.libraryPath)
       const route = await resolveAnalysisRoute(runtime)
@@ -1093,7 +1083,7 @@ function describeHandler(runtime) {
             h: piece.h,
             bbox: piece.bbox,
             url: store.assetUrl(`staging/${body.stageId}/${piece.pieceId}${extension}`) + '&v=' + version,
-            name: annotation.name || `切图 ${index + 1}`,
+            name: annotation.name || `切图 ${offset + index + 1}`,
             category: annotation.category || description.category,
             tags: annotation.tags || description.tags,
             note: annotation.note || description.note,
