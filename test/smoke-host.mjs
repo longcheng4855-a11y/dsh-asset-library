@@ -157,7 +157,7 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const results = []
 const check = (label, value) => results.push([label, value])
 
-check('routes registered', routes.size === 14 ? 'yes (' + routes.size + ')' : 'NO ' + routes.size)
+check('routes registered', routes.size === 15 ? 'yes (' + routes.size + ')' : 'NO ' + routes.size)
 check('tools registered', tools.length === 1 ? tools[0].name : 'NO')
 check('prompt sections', sections.length === 1 ? sections[0].name + '@' + sections[0].order : 'NO')
 
@@ -203,6 +203,8 @@ check(
     (pyDetect.json.objects ? pyDetect.json.objects.length : '-') +
     (pyDetect.json.error ? ' error=' + pyDetect.json.error : ''),
 )
+const pyCheck = await call('/asset-library/python-check', 'POST', {})
+check('python check', pyCheck.status + ' ok=' + pyCheck.json.ok + ' cmd=' + (pyCheck.json.command || pyCheck.json.error))
 check('prepare/stream match', JSON.stringify(lastCall) + ' => ' + JSON.stringify(dispatched))
 
 const described = await call('/asset-library/describe', 'POST', {

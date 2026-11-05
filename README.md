@@ -57,7 +57,7 @@ asset_library {action:"export", ids:["ast_xxx","ast_yyy"], destination:"D:\\MyGa
 - **从链接安装（推荐，不需要安装 git）**：在 Harness 插件管理的「从链接安装 / 添加插件」里粘贴：
 
   ```text
-  https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.0.tar.gz
+  https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.1.tar.gz
   ```
 
   这是仓库的源码压缩包地址，pnpm 直接 HTTPS 下载解包，不调用 `git`。如果粘贴 `git+https://...` 或仓库地址而机器上没装 git，会报 `git ls-remote failed: 'git' 不是内部或外部命令`。
@@ -73,7 +73,7 @@ asset_library {action:"export", ids:["ast_xxx","ast_yyy"], destination:"D:\\MyGa
 command: npx
 args:
   - '-y'
-  - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.0.tar.gz'
+  - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.1.tar.gz'
   - 'dsh-asset-library-mcp'
 ```
 

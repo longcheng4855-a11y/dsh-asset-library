@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1
+
+- 识别不到对象的两个重要修复：
+  - 无 OpenCV 时优先用**逐行网格切分**（每行单独找空列），不再把同一行相邻图标并成一块；测试图从 107 个框提升到 **251 个**；
+  - Python 解析增加 **Harness 自带的运行时 Python**（`%DSH_HOME%\dsh-runtimes\*\dependencies\python`，自带 numpy/Pillow），即使机器没装 Python 也能识别。
+- 仪表盘新增「检测 Python 环境」按钮，直接显示实际使用的解释器；`/detect-local` 响应也带上 `python` 路径。
+- 实测：1408×768 商品图标表，系统 Python + OpenCV 252 个框 / 391ms；Harness 自带 Python 251 个框 / 315ms。
+
 ## 0.9.0
 
 - 新增 **Python 分割引擎**（默认）：`lib/segment.py` 优先用 OpenCV 轮廓找框，没有 OpenCV 时退回网格投影/连通域；实测 500 个对象的精灵表 0.4 秒切完，像素级精修比浏览器版本准得多。

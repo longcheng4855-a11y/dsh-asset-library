@@ -54,7 +54,10 @@ window.__ModuleLoader__.load({
         detectorPython: 'Python 识别（OpenCV，推荐；几百个对象也能切）',
         detectorLocal: '浏览器识别（无依赖，慢一些）',
         detectorModel: '视觉模型找框',
-        detectorHint: '本地识别直接分析像素：剥离背景色、合并碎块后自动框出主体，不依赖模型；模型只负责命名和注释。',
+        detectorHint: 'Python 识别需要本机有 Python（numpy + Pillow，OpenCV 可选，几百个对象也能切）；没装 Python 时自动改用浏览器识别。',
+        checkPython: '检测 Python 环境',
+        pythonOk: 'Python 可用：{cmd}',
+        pythonMissing: '没有找到可用的 Python，将自动改用浏览器识别',
         detectorSaved: '识别方式已更新',
         modelFallback: 'AI 找框失败，已改用本地识别：',
         pythonFallback: 'Python 识别失败，已改用浏览器识别：',
@@ -224,7 +227,10 @@ window.__ModuleLoader__.load({
         detectorPython: 'Python (OpenCV; handles hundreds of objects)',
         detectorLocal: 'Browser (no dependency, slower)',
         detectorModel: 'Vision model boxes',
-        detectorHint: 'Local detection reads pixels directly: removes the border colour, merges fragments and frames each subject. No model needed; the model only names and annotates.',
+        detectorHint: 'Python detection needs a local Python (numpy + Pillow, OpenCV optional) and handles hundreds of objects; without Python the browser falls back automatically.',
+        checkPython: 'Check Python',
+        pythonOk: 'Python available: {cmd}',
+        pythonMissing: 'No usable Python found; the browser detector will be used',
         detectorSaved: 'Detection mode updated',
         modelFallback: 'Vision detection failed, fell back to local:',
         pythonFallback: 'Python detection failed, fell back to the browser:',
@@ -3521,6 +3527,17 @@ window.__ModuleLoader__.load({
           })
       }
 
+      function checkPython() {
+        postJson('/python-check', {})
+          .then(function (result) {
+            if (result.ok) notify(t.pythonOk.replace('{cmd}', result.command || 'python'))
+            else setError(t.pythonMissing + ' ' + (result.error || ''))
+          })
+          .catch(function (reason) {
+            setError(String((reason && reason.message) || reason))
+          })
+      }
+
       function submitCategoryCreate(name) {
         var dialog = catDialog
         if (!dialog) return Promise.resolve()
@@ -3805,6 +3822,15 @@ window.__ModuleLoader__.load({
                     h('option', { value: 'python' }, t.detectorPython),
                     h('option', { value: 'local' }, t.detectorLocal),
                     h('option', { value: 'model' }, t.detectorModel),
+                  ),
+                  h(
+                    Button,
+                    {
+                      onClick: function () {
+                        checkPython()
+                      },
+                    },
+                    t.checkPython,
                   ),
                 ),
               ),

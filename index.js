@@ -13,6 +13,7 @@
  */
 import fsp from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -23,7 +24,7 @@ import { detectObjects, describePieces, MAX_OBJECTS } from './lib/analyze.js'
 export const name = 'asset-library'
 export const inject = ['webServer']
 
-const VERSION = '0.9.0'
+const VERSION = '0.9.1'
 const SEGMENT_SCRIPT = fileURLToPath(new URL('./lib/segment.py', import.meta.url))
 const ROUTE = '/asset-library'
 const SMALL_BODY = 128 * 1024
@@ -515,12 +516,54 @@ function stageHandler(runtime) {
 
 /* ── Python segmentation ──────────────────────────────────────────────── */
 
-function pythonCandidates() {
+/** Python shipped with the Harness runtime: present on every desktop install
+ *  and already has numpy + Pillow, so detection works without a system Python. */
+async function bundledPythonCandidates() {
+  const roots = new Set()
+  if (process.env.DSH_HOME) roots.add(path.join(process.env.DSH_HOME, 'dsh-runtimes'))
+  roots.add(path.join(os.homedir(), '.dsh', 'dsh-runtimes'))
+  const list = []
+  for (const root of roots) {
+    let entries = []
+    try {
+      entries = await fsp.readdir(root, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const base = path.join(root, entry.name, 'dependencies', 'python')
+      const names =
+        process.platform === 'win32'
+          ? [path.join(base, 'python.exe')]
+          : [path.join(base, 'bin', 'python3'), path.join(base, 'bin', 'python')]
+      for (const candidate of names) {
+        try {
+          const stat = await fsp.stat(candidate)
+          if (stat.isFile() && !list.some((entry2) => entry2.command === candidate)) {
+            list.push({ command: candidate, args: [] })
+          }
+        } catch {
+          /* not this runtime */
+        }
+      }
+    }
+  }
+  return list
+}
+
+async function listPythonCandidates() {
   const list = []
   const custom = process.env.DSH_ASSET_PYTHON
   if (typeof custom === 'string' && custom.trim()) list.push({ command: custom.trim(), args: [] })
-  list.push({ command: 'python', args: [] })
-  list.push({ command: 'py', args: ['-3'] })
+  if (process.platform === 'win32') {
+    list.push({ command: 'python', args: [] })
+    list.push({ command: 'py', args: ['-3'] })
+  } else {
+    list.push({ command: 'python3', args: [] })
+    list.push({ command: 'python', args: [] })
+  }
+  for (const candidate of await bundledPythonCandidates()) list.push(candidate)
   return list
 }
 
@@ -566,7 +609,7 @@ function probePython(candidate) {
 
 async function resolvePython(runtime) {
   if (runtime.python !== undefined) return runtime.python
-  for (const candidate of pythonCandidates()) {
+  for (const candidate of await listPythonCandidates()) {
     if (await probePython(candidate)) {
       runtime.python = candidate
       return candidate
@@ -635,6 +678,26 @@ function roundBox(value) {
 }
 
 /** Segment the staged image with Python + OpenCV (falls back inside the script). */
+/** Report which Python the detector will use (dashboard diagnostics). */
+function pythonHandler(runtime) {
+  return async (request, response) => {
+    if (rejected(runtime.ctx, request, response)) return
+    try {
+      const python = await resolvePython(runtime)
+      if (!python) {
+        sendJson(response, 200, {
+          ok: false,
+          error: '没有找到可用的 Python（需要 numpy 和 Pillow，装了 OpenCV 效果最好）',
+        })
+        return
+      }
+      sendJson(response, 200, { ok: true, command: python.command })
+    } catch (error) {
+      sendJson(response, 200, { ok: false, error: errorMessage(error) })
+    }
+  }
+}
+
 function detectLocalHandler(runtime) {
   return async (request, response) => {
     if (rejected(runtime.ctx, request, response)) return
@@ -686,6 +749,7 @@ function detectLocalHandler(runtime) {
       sendJson(response, 200, {
         ok: true,
         engine: result.engine || 'python',
+        python: python.command,
         count: objects.length,
         objects,
       })
@@ -1465,6 +1529,7 @@ function registerRoutes(runtime) {
         { path: `${ROUTE}/stage`, handler: stageHandler(runtime) },
         { path: `${ROUTE}/detect`, handler: detectHandler(runtime) },
         { path: `${ROUTE}/detect-local`, handler: detectLocalHandler(runtime) },
+        { path: `${ROUTE}/python-check`, handler: pythonHandler(runtime) },
         { path: `${ROUTE}/describe`, handler: describeHandler(runtime) },
         { path: `${ROUTE}/commit`, handler: commitHandler(runtime) },
         { path: `${ROUTE}/discard`, handler: discardHandler(runtime) },

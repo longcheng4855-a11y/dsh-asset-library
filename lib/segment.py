@@ -102,17 +102,18 @@ def runs(flags, minimum_gap=2):
 
 
 def boxes_from_grid(mask, max_boxes):
-    """Sprite sheets are usually a grid with empty gaps between cells: split on
-    fully-empty rows/columns and take the tight box of each non-empty cell."""
-    columns = runs(mask.any(axis=0))
-    rows = runs(mask.any(axis=1))
+    """Sprite sheets are usually rows of icons with empty gaps between them:
+    split each non-empty row band on its own empty columns, then take the tight
+    box of every cell. Splitting per row (not globally) keeps icons that share
+    a column range across different rows separate."""
     boxes = []
-    for y0, y1 in rows:
-        for x0, x1 in columns:
-            cell = mask[y0:y1, x0:x1]
-            if not cell.any():
-                continue
+    for y0, y1 in runs(mask.any(axis=1)):
+        band = mask[y0:y1]
+        for x0, x1 in runs(band.any(axis=0)):
+            cell = band[:, x0:x1]
             ys, xs = np.nonzero(cell)
+            if xs.size == 0:
+                continue
             bx0 = int(xs.min()) + x0
             bx1 = int(xs.max()) + x0 + 1
             by0 = int(ys.min()) + y0
@@ -230,8 +231,11 @@ def main():
         except Exception:
             boxes = []
     if not boxes:
-        boxes = boxes_from_flood(mask, max_boxes)
-        engine = "flood"
+        try:
+            boxes = boxes_from_flood(mask, max_boxes)
+            engine = "flood"
+        except Exception:
+            boxes = []
     boxes = scale_boxes(boxes, scale, width, height)
     boxes = order_boxes([box for box in boxes if box[2] >= MIN_BOX and box[3] >= MIN_BOX])
     sys.stdout.write(
