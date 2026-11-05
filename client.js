@@ -58,6 +58,16 @@ window.__ModuleLoader__.load({
         checkPython: '检测 Python 环境',
         pythonOk: 'Python 可用：{cmd}',
         pythonMissing: '没有找到可用的 Python，将自动改用浏览器识别',
+        pythonChecking: '正在检测 Python…',
+        pythonSetup: '创建 Python 环境',
+        pythonSetupConfirm: '会在 Harness 数据目录下创建一个独立 Python 环境（不影响系统）：联网下载 numpy、Pillow；选完整安装时再装 OpenCV。约 60–80MB，1–3 分钟。',
+        pythonSetupFull: '完整安装（含 OpenCV）',
+        pythonSetupLite: '轻量安装（约 25MB）',
+        pythonSetupCancel: '取消',
+        pythonSetupRunning: '正在安装：',
+        pythonSetupDone: 'Python 环境已就绪：{path}',
+        pythonSetupFailed: '创建环境失败：',
+        setupSteps: { base: '准备解释器', venv: '创建虚拟环境', pip: '下载依赖', verify: '校验环境', done: '完成' },
         detectorSaved: '识别方式已更新',
         modelFallback: 'AI 找框失败，已改用本地识别：',
         pythonFallback: 'Python 识别失败，已改用浏览器识别：',
@@ -231,6 +241,16 @@ window.__ModuleLoader__.load({
         checkPython: 'Check Python',
         pythonOk: 'Python available: {cmd}',
         pythonMissing: 'No usable Python found; the browser detector will be used',
+        pythonChecking: 'Checking Python…',
+        pythonSetup: 'Create Python env',
+        pythonSetupConfirm: 'Creates a private Python environment under the Harness data folder (your system Python stays untouched): downloads numpy and Pillow, plus OpenCV for the full install. About 60–80MB, 1–3 minutes.',
+        pythonSetupFull: 'Full install (with OpenCV)',
+        pythonSetupLite: 'Light install (~25MB)',
+        pythonSetupCancel: 'Cancel',
+        pythonSetupRunning: 'Installing:',
+        pythonSetupDone: 'Python environment ready: {path}',
+        pythonSetupFailed: 'Failed to create the environment:',
+        setupSteps: { base: 'preparing', venv: 'creating venv', pip: 'installing packages', verify: 'verifying', done: 'done' },
         detectorSaved: 'Detection mode updated',
         modelFallback: 'Vision detection failed, fell back to local:',
         pythonFallback: 'Python detection failed, fell back to the browser:',
@@ -3431,6 +3451,15 @@ window.__ModuleLoader__.load({
       var autoState = React.useState(true)
       var autoAnalyze = autoState[0]
       var setAutoAnalyze = autoState[1]
+      var pythonState = React.useState(null)
+      var pythonInfo = pythonState[0]
+      var setPythonInfo = pythonState[1]
+      var setupState = React.useState(null)
+      var setup = setupState[0]
+      var setSetup = setupState[1]
+      var confirmState = React.useState(false)
+      var setupConfirm = confirmState[0]
+      var setSetupConfirm = confirmState[1]
 
       var refresh = React.useCallback(function () {
         return request('/state')
@@ -3472,6 +3501,57 @@ window.__ModuleLoader__.load({
       var notify = React.useCallback(function (text) {
         setNotice(String(text || ''))
       }, [])
+
+      React.useEffect(
+        function () {
+          request('/python-check')
+            .then(function (info) {
+              setPythonInfo(info)
+            })
+            .catch(function (reason) {
+              setPythonInfo({ ok: false, error: String((reason && reason.message) || reason) })
+            })
+        },
+        [],
+      )
+
+      React.useEffect(
+        function () {
+          if (!setup || setup.state !== 'running') return undefined
+          var timer = setInterval(function () {
+            request('/python-status')
+              .then(function (status) {
+                setSetup(status)
+                if (status.state === 'done') {
+                  setPythonInfo({ ok: true, command: status.python })
+                  notify((t.pythonSetupDone || '').replace('{path}', status.python || ''))
+                }
+              })
+              .catch(function () {
+                /* transient poll failure: keep trying */
+              })
+          }, 1500)
+          return function () {
+            clearInterval(timer)
+          }
+        },
+        [setup && setup.state],
+      )
+
+      function startSetup(withOpenCV) {
+        setSetupConfirm(false)
+        setError('')
+        setSetup({ state: 'running', step: 'base', message: '' })
+        postJson('/python-setup', { withOpenCV: Boolean(withOpenCV) })
+          .then(function (status) {
+            setSetup(status)
+          })
+          .catch(function (reason) {
+            var message = String((reason && reason.message) || reason)
+            setSetup({ state: 'error', step: 'error', message: message })
+            setError(message)
+          })
+      }
 
       function toggleEnabled() {
         if (!snapshot) return
@@ -3832,7 +3912,88 @@ window.__ModuleLoader__.load({
                     },
                     t.checkPython,
                   ),
+                  h(
+                    Button,
+                    {
+                      onClick: function () {
+                        setSetupConfirm(true)
+                      },
+                    },
+                    t.pythonSetup,
+                  ),
                 ),
+                h(
+                  'div',
+                  { className: 'al-muted', style: { marginTop: '4px' } },
+                  pythonInfo
+                    ? pythonInfo.ok
+                      ? (t.pythonOk || '').replace('{cmd}', pythonInfo.command || '')
+                      : (t.pythonMissing || '') + (pythonInfo.error ? ' ' + pythonInfo.error : '')
+                    : t.pythonChecking,
+                ),
+                setupConfirm
+                  ? h(
+                      'div',
+                      { className: 'al-warn', style: { marginTop: '6px' } },
+                      h('div', {}, t.pythonSetupConfirm),
+                      h(
+                        'div',
+                        { className: 'al-toolbar', style: { marginTop: '6px' } },
+                        h(
+                          Button,
+                          {
+                            primary: true,
+                            onClick: function () {
+                              startSetup(true)
+                            },
+                          },
+                          t.pythonSetupFull,
+                        ),
+                        h(
+                          Button,
+                          {
+                            onClick: function () {
+                              startSetup(false)
+                            },
+                          },
+                          t.pythonSetupLite,
+                        ),
+                        h(
+                          Button,
+                          {
+                            onClick: function () {
+                              setSetupConfirm(false)
+                            },
+                          },
+                          t.pythonSetupCancel,
+                        ),
+                      ),
+                    )
+                  : null,
+                setup && setup.state === 'running'
+                  ? h(
+                      'div',
+                      { className: 'al-muted', style: { marginTop: '4px' } },
+                      t.pythonSetupRunning +
+                        ' ' +
+                        ((t.setupSteps && t.setupSteps[setup.step]) || '') +
+                        (setup.message ? ' · ' + setup.message : ''),
+                    )
+                  : null,
+                setup && setup.state === 'done'
+                  ? h(
+                      'div',
+                      { className: 'al-muted', style: { marginTop: '4px' } },
+                      (t.pythonSetupDone || '').replace('{path}', setup.python || ''),
+                    )
+                  : null,
+                setup && setup.state === 'error'
+                  ? h(
+                      'div',
+                      { className: 'al-error', style: { marginTop: '4px' } },
+                      t.pythonSetupFailed + ' ' + (setup.message || ''),
+                    )
+                  : null,
               ),
               h(
                 'div',

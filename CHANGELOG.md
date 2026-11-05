@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.2
+
+- 新增「创建 Python 环境」：仪表盘自动检测 Python；找不到时可在确认后一键创建独立 venv（在 Harness 数据目录下，不影响系统 Python），自动安装 numpy、Pillow，可选 OpenCV。
+- 安装过程有步骤与日志进度（准备解释器 → 创建 venv → 下载依赖 → 校验），完成后自动切换使用新环境。
+- 新增 `POST /asset-library/python-setup`、`GET /asset-library/python-status` 路由。
+- 新用户无需自己安装 Python；创建过的环境在下次启动时会被优先使用。
+
 ## 0.9.1
 
 - 识别不到对象的两个重要修复：

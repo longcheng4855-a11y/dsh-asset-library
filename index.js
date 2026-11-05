@@ -24,7 +24,7 @@ import { detectObjects, describePieces, MAX_OBJECTS } from './lib/analyze.js'
 export const name = 'asset-library'
 export const inject = ['webServer']
 
-const VERSION = '0.9.1'
+const VERSION = '0.9.2'
 const SEGMENT_SCRIPT = fileURLToPath(new URL('./lib/segment.py', import.meta.url))
 const ROUTE = '/asset-library'
 const SMALL_BODY = 128 * 1024
@@ -556,6 +556,8 @@ async function listPythonCandidates() {
   const list = []
   const custom = process.env.DSH_ASSET_PYTHON
   if (typeof custom === 'string' && custom.trim()) list.push({ command: custom.trim(), args: [] })
+  const created = venvPython(venvRoot())
+  if (await existsFile(created)) list.push({ command: created, args: [] })
   if (process.platform === 'win32') {
     list.push({ command: 'python', args: [] })
     list.push({ command: 'py', args: ['-3'] })
@@ -677,7 +679,184 @@ function roundBox(value) {
   return Math.round(Math.min(1, Math.max(0, value)) * 10000) / 10000
 }
 
-/** Segment the staged image with Python + OpenCV (falls back inside the script). */
+/* ── Python environment bootstrap ────────────────────────────────────── */
+
+function venvRoot() {
+  return path.join(store.configDir(), 'python')
+}
+
+function venvPython(root) {
+  return process.platform === 'win32' ? path.join(root, 'Scripts', 'python.exe') : path.join(root, 'bin', 'python')
+}
+
+async function existsFile(target) {
+  try {
+    const stat = await fsp.stat(target)
+    return stat.isFile()
+  } catch {
+    return false
+  }
+}
+
+function runProcess(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    let child
+    try {
+      child = spawn(command, args, { windowsHide: true, cwd: options.cwd, env: options.env || process.env })
+    } catch (error) {
+      reject(error)
+      return
+    }
+    let out = ''
+    let err = ''
+    let settled = false
+    const finish = (fn, value) => {
+      if (settled) return
+      settled = true
+      fn(value)
+    }
+    const timer = setTimeout(() => {
+      try {
+        child.kill()
+      } catch {
+        /* ignore */
+      }
+      finish(reject, new Error('执行超时'))
+    }, options.timeoutMs || 120000)
+    child.stdout.on('data', (chunk) => {
+      const text = chunk.toString()
+      out += text
+      if (options.onOutput) options.onOutput(text)
+    })
+    child.stderr.on('data', (chunk) => {
+      const text = chunk.toString()
+      err += text
+      if (options.onOutput) options.onOutput(text)
+    })
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      finish(reject, error)
+    })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      if (code === 0) {
+        finish(resolve, { out, err })
+        return
+      }
+      const tail = (err || out).trim().split('\n').slice(-3).join(' ').slice(0, 400)
+      finish(reject, new Error(tail || `退出码 ${code}`))
+    })
+  })
+}
+
+/**
+ * Create a private venv with numpy/Pillow (and optionally OpenCV) so a fresh
+ * machine can detect objects without installing Python itself. Long running,
+ * so the panel polls `/python-status` while it works.
+ */
+function startPythonSetup(runtime, withOpenCV) {
+  if (!runtime.pythonSetup) {
+    runtime.pythonSetup = { state: 'idle', step: '', message: '', log: '', python: '' }
+  }
+  const setup = runtime.pythonSetup
+  if (setup.state === 'running') return setup
+  setup.state = 'running'
+  setup.step = 'base'
+  setup.message = ''
+  setup.log = ''
+  setup.python = ''
+  setup.withOpenCV = Boolean(withOpenCV)
+  const append = (text) => {
+    setup.log = (setup.log + text).slice(-6000)
+    const lines = setup.log.trim().split('\n')
+    const last = lines.length > 0 ? lines[lines.length - 1].trim() : ''
+    if (last) setup.message = last.slice(0, 200)
+  }
+  ;(async () => {
+    try {
+      let base = await resolvePython(runtime)
+      if (!base) {
+        for (const candidate of await listPythonCandidates()) {
+          if (await probePython(candidate)) {
+            base = candidate
+            break
+          }
+        }
+      }
+      if (!base) throw new Error('没有可用于创建环境的 Python（未找到系统 Python 或 Harness 运行时 Python）')
+      const root = venvRoot()
+      const target = venvPython(root)
+      if (!(await existsFile(target))) {
+        setup.step = 'venv'
+        append('创建虚拟环境：' + root + '\n')
+        await fsp.mkdir(path.dirname(root), { recursive: true })
+        await runProcess(base.command, [...base.args, '-m', 'venv', root], {
+          timeoutMs: 240000,
+          onOutput: append,
+        })
+      }
+      if (!(await existsFile(target))) throw new Error('虚拟环境创建失败：找不到 python 可执行文件')
+      setup.step = 'pip'
+      const packages = ['numpy', 'Pillow']
+      if (setup.withOpenCV) packages.push('opencv-python-headless')
+      append('安装依赖：' + packages.join(' ') + '\n')
+      await runProcess(target, ['-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', ...packages], {
+        timeoutMs: 900000,
+        onOutput: append,
+      })
+      setup.step = 'verify'
+      const ok = await probePython({ command: target, args: [] })
+      if (!ok) throw new Error('依赖安装完成，但 Python 无法导入 numpy/Pillow')
+      runtime.python = { command: target, args: [] }
+      setup.python = target
+      setup.state = 'done'
+      setup.step = 'done'
+      setup.message = '环境已就绪'
+    } catch (error) {
+      setup.state = 'error'
+      setup.step = 'error'
+      setup.message = errorMessage(error).slice(0, 500)
+    }
+  })()
+  return setup
+}
+
+function setupPayload(setup) {
+  return {
+    ok: true,
+    state: setup.state,
+    step: setup.step,
+    message: setup.message,
+    python: setup.python || '',
+    log: String(setup.log || '').slice(-2000),
+  }
+}
+
+function pythonSetupHandler(runtime) {
+  return async (request, response) => {
+    if (rejected(runtime.ctx, request, response)) return
+    if (request.method !== 'POST') {
+      sendJson(response, 405, { ok: false, error: '只支持 POST' })
+      return
+    }
+    try {
+      const body = await readJson(request).catch(() => null)
+      const setup = startPythonSetup(runtime, Boolean(body && body.withOpenCV))
+      sendJson(response, 200, setupPayload(setup))
+    } catch (error) {
+      sendJson(response, 500, { ok: false, error: errorMessage(error) })
+    }
+  }
+}
+
+function pythonStatusHandler(runtime) {
+  return async (request, response) => {
+    if (rejected(runtime.ctx, request, response)) return
+    const setup = runtime.pythonSetup || { state: 'idle', step: '', message: '', python: '' }
+    sendJson(response, 200, setupPayload(setup))
+  }
+}
+
 /** Report which Python the detector will use (dashboard diagnostics). */
 function pythonHandler(runtime) {
   return async (request, response) => {
@@ -698,6 +877,7 @@ function pythonHandler(runtime) {
   }
 }
 
+/** Segment the staged image with Python + OpenCV (falls back inside the script). */
 function detectLocalHandler(runtime) {
   return async (request, response) => {
     if (rejected(runtime.ctx, request, response)) return
@@ -1530,6 +1710,8 @@ function registerRoutes(runtime) {
         { path: `${ROUTE}/detect`, handler: detectHandler(runtime) },
         { path: `${ROUTE}/detect-local`, handler: detectLocalHandler(runtime) },
         { path: `${ROUTE}/python-check`, handler: pythonHandler(runtime) },
+        { path: `${ROUTE}/python-setup`, handler: pythonSetupHandler(runtime) },
+        { path: `${ROUTE}/python-status`, handler: pythonStatusHandler(runtime) },
         { path: `${ROUTE}/describe`, handler: describeHandler(runtime) },
         { path: `${ROUTE}/commit`, handler: commitHandler(runtime) },
         { path: `${ROUTE}/discard`, handler: discardHandler(runtime) },
