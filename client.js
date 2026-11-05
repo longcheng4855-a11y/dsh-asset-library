@@ -12,6 +12,7 @@ window.__ModuleLoader__.load({
     var h = React.createElement
 
     var API = '/asset-library'
+    var MAX_PIECES = 24
 
     /* ── visible text ─────────────────────────────────────────────────── */
 
@@ -91,7 +92,7 @@ window.__ModuleLoader__.load({
         pasted: '已粘贴图片',
         piecesTitle: '切图',
         confirmImport: '确认入库',
-        tooMany: '一张图最多 6 个切图',
+        tooMany: '一张图最多 {n} 个切图',
         review: '待确认框选',
         reviewHint: '先确认框选是否准确，再让 AI 命名',
         named: '已命名，待入库',
@@ -258,7 +259,7 @@ window.__ModuleLoader__.load({
         pasted: 'Image pasted',
         piecesTitle: 'Pieces',
         confirmImport: 'Save',
-        tooMany: 'At most 6 pieces per image',
+        tooMany: 'At most {n} pieces per image',
         review: 'Check the boxes',
         reviewHint: 'Confirm the boxes, then let the AI name them',
         named: 'Named, ready to save',
@@ -820,7 +821,7 @@ window.__ModuleLoader__.load({
     }
 
     function foregroundBoxes(image) {
-      var MAX = 512
+      var MAX = 640
       var width0 = image.naturalWidth || image.width
       var height0 = image.naturalHeight || image.height
       if (!width0 || !height0) return []
@@ -896,7 +897,7 @@ window.__ModuleLoader__.load({
       mask = closeMask(mask, w, h, 2, false)
 
       var components = findComponents(mask, w, h)
-      var minArea = Math.max(12, Math.round(pixels * 0.0008))
+      var minArea = Math.max(10, Math.round(pixels * 0.0006))
       var boxes = []
       for (var c = 0; c < components.length; c += 1) {
         if (components[c].count >= minArea) boxes.push(components[c])
@@ -908,8 +909,8 @@ window.__ModuleLoader__.load({
         })
         boxes = boxes.slice(0, 400)
       }
-      boxes = mergeComponents(boxes, Math.max(2, Math.round(Math.min(w, h) * 0.006)))
-      var minBoxArea = Math.max(1, Math.round(pixels * 0.0025))
+      boxes = mergeComponents(boxes, Math.max(2, Math.round(Math.min(w, h) * 0.004)))
+      var minBoxArea = Math.max(1, Math.round(pixels * 0.0012))
       boxes = boxes.filter(function (box) {
         var area = (box.x1 - box.x0 + 1) * (box.y1 - box.y0 + 1)
         return box.count >= minBoxArea && area < pixels * 0.94
@@ -918,7 +919,7 @@ window.__ModuleLoader__.load({
       boxes.sort(function (left, right) {
         return right.count - left.count
       })
-      boxes = boxes.slice(0, 6)
+      boxes = boxes.slice(0, MAX_PIECES)
       boxes.sort(function (left, right) {
         var rowLeft = Math.round(left.y0 / (h * 0.22))
         var rowRight = Math.round(right.y0 / (h * 0.22))
@@ -1762,6 +1763,7 @@ window.__ModuleLoader__.load({
             }
             if (result.usage) patch.usage = result.usage
             if (result.title) patch.name = result.title
+            if (result.warning) patch.warning = result.warning
             patchEntry(key, patch)
           })
           .catch(function (error) {
@@ -2079,8 +2081,8 @@ window.__ModuleLoader__.load({
         var current = findEntry(entry.key)
         if (!current || !current.url) return
         var index = (current.pieces || []).length
-        if (index >= 6) {
-          notify(t.tooMany)
+        if (index >= MAX_PIECES) {
+          notify(t.tooMany.replace('{n}', String(MAX_PIECES)))
           return
         }
         cropPiece(current.url, bbox, t.manualObject + ' ' + (index + 1), index)

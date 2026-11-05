@@ -13,6 +13,7 @@ const tools = []
 const sections = []
 let lastCall = null
 let dispatched = null
+let describeCalls = 0
 
 const attachments = {
   async saveImage(input) {
@@ -33,6 +34,7 @@ const llm = {
       stream(options) {
         dispatched = { provider: options.provider, model: options.model, temperature: options.temperature, maxTokens: options.maxTokens }
         const describe = String(options.system || '').includes('按顺序切出的片段')
+        if (describe) describeCalls += 1
         const payload = describe
           ? {
               title: '红色小方块',
@@ -221,6 +223,25 @@ const duplicate = await call('/asset-library/stage', 'POST', {
   hash: 'testhash1',
 })
 check('duplicate detected', String(duplicate.json.duplicate) + ' ' + (duplicate.json.item ? duplicate.json.item.name : '-'))
+
+const stagedMany = await call('/asset-library/stage', 'POST', {
+  name: 'many',
+  mediaType: 'image/png',
+  data: png.toString('base64'),
+  width: 2,
+  height: 2,
+  hash: 'testhash2',
+})
+const manyPieces = []
+for (let i = 0; i < 10; i += 1) {
+  manyPieces.push({ data: png.toString('base64'), mediaType: 'image/png', w: 2, h: 2, bbox: [0.01 * i, 0.1, 0.2, 0.2] })
+}
+describeCalls = 0
+const many = await call('/asset-library/describe', 'POST', { stageId: stagedMany.json.stageId, pieces: manyPieces })
+check(
+  'batch describe',
+  many.status + ' pieces=' + (many.json.pieces ? many.json.pieces.length : JSON.stringify(many.json)) + ' modelCalls=' + describeCalls,
+)
 
 const createdCat = await call('/asset-library/category', 'POST', { action: 'create', path: '新分类/子类' })
 const afterCreate = await call('/asset-library/state', 'GET')

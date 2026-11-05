@@ -21,7 +21,7 @@ import { detectObjects, describePieces, MAX_OBJECTS } from './lib/analyze.js'
 export const name = 'asset-library'
 export const inject = ['webServer']
 
-const VERSION = '0.6.1'
+const VERSION = '0.7.0'
 const ROUTE = '/asset-library'
 const SMALL_BODY = 128 * 1024
 const UPLOAD_BODY = 40 * 1024 * 1024
@@ -179,15 +179,12 @@ async function modelList(runtime) {
   return value
 }
 
-async function resolveAnalysisRoute(runtime) {
-  const config = await store.readConfig()
-  const models = await modelList(runtime)
+function pickAnalysisRoute(config, models, fallback) {
   const configured = config.analysis || {}
   if (configured.provider && configured.model) {
     const known = models.find((entry) => entry.provider === configured.provider && entry.model === configured.model)
     return { provider: configured.provider, model: configured.model, image: known ? known.image : true }
   }
-  const fallback = defaultSelection(runtime.ctx)
   if (fallback) {
     const known = models.find((entry) => entry.provider === fallback.provider && entry.model === fallback.model)
     if (known && known.image) return known
@@ -198,7 +195,46 @@ async function resolveAnalysisRoute(runtime) {
   if (preferred) return preferred
   if (fallback) return { ...fallback, image: false }
   if (models[0]) return models[0]
-  throw new Error('没有可用的模型，请先在设置里配置模型')
+  return null
+}
+
+/**
+ * Reasoning eats the whole token budget on some models, leaving no answer.
+ * Ask the adapter for the effort list and use its lowest entry for these short
+ * JSON tasks. Cached for five minutes; an empty string means "let the adapter
+ * decide".
+ */
+async function lowestReasoningEffort(runtime, provider, model) {
+  const key = `${provider}/${model}`
+  const now = Date.now()
+  if (!runtime.efforts) runtime.efforts = new Map()
+  const cached = runtime.efforts.get(key)
+  if (cached && now - cached.at < 300000) return cached.value
+  let value = ''
+  try {
+    const llm = typeof runtime.ctx.get === 'function' ? runtime.ctx.get('llm') : undefined
+    if (llm && typeof llm.resolveModelInfo === 'function') {
+      const info = await withTimeout(Promise.resolve().then(() => llm.resolveModelInfo(provider, model)), 4000, null)
+      const efforts = info && info.reasoning && Array.isArray(info.reasoning.efforts) ? info.reasoning.efforts : []
+      if (efforts.length > 0) {
+        const preferred = efforts.find((entry) => /none|off|minimal|low/i.test(String(entry.id)))
+        value = String((preferred || efforts[0]).id)
+      }
+    }
+  } catch {
+    value = ''
+  }
+  runtime.efforts.set(key, { at: now, value })
+  return value
+}
+
+async function resolveAnalysisRoute(runtime) {
+  const config = await store.readConfig()
+  const models = await modelList(runtime)
+  const route = pickAnalysisRoute(config, models, defaultSelection(runtime.ctx))
+  if (!route) throw new Error('没有可用的模型，请先在设置里配置模型')
+  const reasoningEffort = await lowestReasoningEffort(runtime, route.provider, route.model)
+  return { ...route, reasoningEffort }
 }
 
 /* ── snapshot ─────────────────────────────────────────────────────────── */
@@ -510,6 +546,7 @@ function detectHandler(runtime) {
         categories: store.categoryPaths(state.items),
         provider: route.provider,
         model: route.model,
+        reasoningEffort: route.reasoningEffort,
         signal: controller.signal,
       })
       await recordUsage(config, detection.usage)
@@ -599,6 +636,7 @@ function describeHandler(runtime) {
         categories: store.categoryPaths(state.items),
         provider: route.provider,
         model: route.model,
+        reasoningEffort: route.reasoningEffort,
         signal: controller.signal,
       })
       meta.title = description.title || meta.title
@@ -614,6 +652,7 @@ function describeHandler(runtime) {
         tags: description.tags,
         note: description.note,
         usage: description.usage || null,
+        warning: description.warning || '',
         model: `${route.provider}/${route.model}`,
         pieces: pieces.map((piece, index) => {
           const annotation = description.pieces[index] || {}
