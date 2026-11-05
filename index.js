@@ -24,7 +24,7 @@ import { detectObjects, describePieces, MAX_OBJECTS } from './lib/analyze.js'
 export const name = 'asset-library'
 export const inject = ['webServer']
 
-const VERSION = '0.9.3'
+const VERSION = '0.9.4'
 const SEGMENT_SCRIPT = fileURLToPath(new URL('./lib/segment.py', import.meta.url))
 const ROUTE = '/asset-library'
 const SMALL_BODY = 128 * 1024
@@ -153,7 +153,7 @@ function defaultSelection(ctx) {
 
 async function modelList(runtime) {
   const now = Date.now()
-  if (runtime.models && now - runtime.models.at < 60000) return runtime.models.value
+  if (runtime.models && now - runtime.models.at < 300000) return runtime.models.value
   const llm = typeof runtime.ctx.get === 'function' ? runtime.ctx.get('llm') : undefined
   if (!llm || typeof llm.listProviders !== 'function') return []
   const entries = []
@@ -255,7 +255,7 @@ async function snapshot(runtime) {
     enabled: config.enabled,
     detector: config.detector,
     analysis: config.analysis,
-    models: await modelList(runtime),
+    models: await withTimeout(Promise.resolve().then(() => modelList(runtime)), 1200, []),
     defaultModel: defaultSelection(runtime.ctx),
     items: [],
     tree: [],
@@ -346,8 +346,20 @@ function fileHandler(runtime) {
 function stateHandler(runtime) {
   return async (request, response) => {
     if (rejected(runtime.ctx, request, response)) return
+    const started = Date.now()
     try {
-      sendJson(response, 200, await snapshot(runtime))
+      const data = await snapshot(runtime)
+      const ms = Date.now() - started
+      if (ms > 800) {
+        void fsp
+          .writeFile(
+            path.join(store.configDir(), 'last-state.json'),
+            JSON.stringify({ at: new Date().toISOString(), ms, items: Array.isArray(data.items) ? data.items.length : 0 }),
+            'utf8',
+          )
+          .catch(() => undefined)
+      }
+      sendJson(response, 200, data)
     } catch (error) {
       sendJson(response, 500, { ok: false, error: errorMessage(error) })
     }

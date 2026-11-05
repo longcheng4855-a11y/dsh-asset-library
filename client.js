@@ -61,6 +61,7 @@ window.__ModuleLoader__.load({
         continueNaming: '继续命名下一批',
         regenerateBatch: '重新生成这一批',
         namedRange: '已命名 {start}–{end} / 共 {total} 个',
+        timeout: '请求超时（素材很多或后端忙），请点重试',
         pythonChecking: '正在检测 Python…',
         pythonSetup: '创建 Python 环境',
         pythonSetupConfirm: '会在 Harness 数据目录下创建一个独立 Python 环境（不影响系统）：联网下载 numpy、Pillow；选完整安装时再装 OpenCV。约 60–80MB，1–3 分钟。',
@@ -247,6 +248,7 @@ window.__ModuleLoader__.load({
         continueNaming: 'Name next batch',
         regenerateBatch: 'Regenerate this batch',
         namedRange: 'Named {start}–{end} of {total}',
+        timeout: 'Request timed out (large library or busy host); press Retry',
         pythonChecking: 'Checking Python…',
         pythonSetup: 'Create Python env',
         pythonSetupConfirm: 'Creates a private Python environment under the Harness data folder (your system Python stays untouched): downloads numpy and Pillow, plus OpenCV for the full install. About 60–80MB, 1–3 minutes.',
@@ -581,8 +583,23 @@ window.__ModuleLoader__.load({
       return MESSAGES[lang] || MESSAGES.zh
     }
 
-    async function request(path, options) {
-      var response = await fetch(API + path, options)
+    async function request(path, options, timeoutMs) {
+      var finalOptions = options
+      var controller = null
+      var timer = null
+      if (timeoutMs && typeof AbortController === 'function') {
+        controller = new AbortController()
+        finalOptions = Object.assign({}, options || {}, { signal: controller.signal })
+        timer = setTimeout(function () {
+          controller.abort()
+        }, timeoutMs)
+      }
+      var response
+      try {
+        response = await fetch(API + path, finalOptions)
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
       var payload = null
       try {
         payload = await response.json()
@@ -3509,14 +3526,16 @@ window.__ModuleLoader__.load({
       var setSetupConfirm = confirmState[1]
 
       var refresh = React.useCallback(function () {
-        return request('/state')
+        return request('/state', undefined, 12000)
           .then(function (next) {
             setSnapshot(next)
             setError('')
             return next
           })
           .catch(function (reason) {
-            setError(String((reason && reason.message) || reason))
+            var text = String((reason && reason.message) || reason)
+            if (reason && (reason.name === 'AbortError' || /abort/i.test(text))) text = t.timeout
+            setError(text)
             return null
           })
           .then(function (result) {
