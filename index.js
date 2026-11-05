@@ -21,10 +21,11 @@ import { detectObjects, describePieces, MAX_OBJECTS } from './lib/analyze.js'
 export const name = 'asset-library'
 export const inject = ['webServer']
 
-const VERSION = '0.7.0'
+const VERSION = '0.8.0'
 const ROUTE = '/asset-library'
 const SMALL_BODY = 128 * 1024
 const UPLOAD_BODY = 40 * 1024 * 1024
+const COMMIT_BODY = 160 * 1024 * 1024
 const MAX_ORIGINAL_BYTES = 24 * 1024 * 1024
 const MAX_THUMB_BYTES = 3 * 1024 * 1024
 const MAX_SEGMENT_BYTES = 12 * 1024 * 1024
@@ -724,7 +725,7 @@ function commitHandler(runtime) {
         sendJson(response, 400, { ok: false, error: '还没有设置素材库路径' })
         return
       }
-      const body = await readJson(request, UPLOAD_BODY)
+      const body = await readJson(request, COMMIT_BODY)
       if (!body || typeof body.stageId !== 'string' || !Array.isArray(body.pieces)) {
         sendJson(response, 400, { ok: false, error: '请求格式无效' })
         return

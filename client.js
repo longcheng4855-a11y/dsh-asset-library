@@ -12,7 +12,8 @@ window.__ModuleLoader__.load({
     var h = React.createElement
 
     var API = '/asset-library'
-    var MAX_PIECES = 24
+    var MAX_PIECES = 1000
+    var NAMING_CAP = 120
 
     /* ── visible text ─────────────────────────────────────────────────── */
 
@@ -131,6 +132,7 @@ window.__ModuleLoader__.load({
         usageBadge: 'tokens',
         usageHint: '本次 AI 识别消耗的输入/输出 token',
         usageEmpty: '还没有调用过模型',
+        namingCapHint: '切图较多（{n} 个）：AI 命名每次处理前 {cap} 个，其余保留编号，可手动改名',
         duplicate: '已在素材库中',
         duplicateHint: '这张图片已经导入过，未重复入库：',
         ready: '待确认',
@@ -298,6 +300,7 @@ window.__ModuleLoader__.load({
         usageBadge: 'tokens',
         usageHint: 'Input/output tokens spent by this AI pass',
         usageEmpty: 'No model calls yet',
+        namingCapHint: 'Many pieces ({n}): AI naming handles the first {cap} per run; the rest keep their numbers',
         duplicate: 'Already in the library',
         duplicateHint: 'This image was imported before, so it was skipped:',
         ready: 'Review',
@@ -820,20 +823,15 @@ window.__ModuleLoader__.load({
       return boxes
     }
 
-    function foregroundBoxes(image) {
-      var MAX = 640
-      var width0 = image.naturalWidth || image.width
-      var height0 = image.naturalHeight || image.height
-      if (!width0 || !height0) return []
-      var scale = Math.min(1, MAX / Math.max(width0, height0))
-      var w = Math.max(1, Math.round(width0 * scale))
-      var h = Math.max(1, Math.round(height0 * scale))
-      var canvas = document.createElement('canvas')
-      canvas.width = w
-      canvas.height = h
+    /* ── local object boxes (no model, tiled for dense sheets) ────────── */
+
+    /* Analyze one already-drawn canvas (a tile, or the whole image) and
+       return boxes in that canvas's pixel space. */
+    function maskBoxes(canvas) {
+      var w = canvas.width
+      var h = canvas.height
       var context = canvas.getContext('2d', { willReadFrequently: true })
       if (!context) return []
-      context.drawImage(image, 0, 0, w, h)
       var data
       try {
         data = context.getImageData(0, 0, w, h).data
@@ -897,52 +895,186 @@ window.__ModuleLoader__.load({
       mask = closeMask(mask, w, h, 2, false)
 
       var components = findComponents(mask, w, h)
-      var minArea = Math.max(10, Math.round(pixels * 0.0006))
+      var minArea = Math.max(8, Math.round(pixels * 0.0004))
       var boxes = []
       for (var c = 0; c < components.length; c += 1) {
         if (components[c].count >= minArea) boxes.push(components[c])
       }
       if (boxes.length === 0) return []
-      if (boxes.length > 400) {
+      if (boxes.length > 500) {
         boxes.sort(function (left, right) {
           return right.count - left.count
         })
-        boxes = boxes.slice(0, 400)
+        boxes = boxes.slice(0, 500)
       }
-      boxes = mergeComponents(boxes, Math.max(2, Math.round(Math.min(w, h) * 0.004)))
-      var minBoxArea = Math.max(1, Math.round(pixels * 0.0012))
-      boxes = boxes.filter(function (box) {
+      boxes = mergeComponents(boxes, Math.max(2, Math.round(Math.min(w, h) * 0.003)))
+      var minBoxArea = Math.max(4, Math.round(pixels * 0.0006))
+      return boxes.filter(function (box) {
         var area = (box.x1 - box.x0 + 1) * (box.y1 - box.y0 + 1)
-        return box.count >= minBoxArea && area < pixels * 0.94
+        return box.count >= minBoxArea && area < pixels * 0.96
       })
-      if (boxes.length === 0) return []
-      boxes.sort(function (left, right) {
-        return right.count - left.count
+    }
+
+    /** Draw one region of the source at analysis size and map boxes back. */
+    function analyzeRegion(image, rx, ry, rw, rh) {
+      try {
+        var MAX = 640
+        var scale = Math.min(1, MAX / Math.max(rw, rh))
+        var w = Math.max(1, Math.round(rw * scale))
+        var h = Math.max(1, Math.round(rh * scale))
+        var canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        var context = canvas.getContext('2d', { willReadFrequently: true })
+        if (!context) return []
+        context.drawImage(image, rx, ry, rw, rh, 0, 0, w, h)
+        var boxes = maskBoxes(canvas)
+        var mapped = []
+        for (var i = 0; i < boxes.length; i += 1) {
+          var box = boxes[i]
+          mapped.push({
+            x0: rx + box.x0 / scale,
+            y0: ry + box.y0 / scale,
+            x1: rx + (box.x1 + 1) / scale,
+            y1: ry + (box.y1 + 1) / scale,
+            count: box.count,
+          })
+        }
+        return mapped
+      } catch (error) {
+        return []
+      }
+    }
+
+    function boxArea(box) {
+      return Math.max(1, (box.x1 - box.x0) * (box.y1 - box.y0))
+    }
+
+    function overlapRatio(a, b) {
+      var ix = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0))
+      var iy = Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0))
+      var inter = ix * iy
+      if (inter <= 0) return 0
+      return inter / Math.min(boxArea(a), boxArea(b))
+    }
+
+    function unionBox(a, b) {
+      return {
+        x0: Math.min(a.x0, b.x0),
+        y0: Math.min(a.y0, b.y0),
+        x1: Math.max(a.x1, b.x1),
+        y1: Math.max(a.y1, b.y1),
+        count: (a.count || 0) + (b.count || 0),
+      }
+    }
+
+    /** Stitch tile results: an object seen by two overlapping tiles becomes one box. */
+    function mergeTileBoxes(boxes) {
+      var list = boxes.slice().sort(function (a, b) {
+        return boxArea(b) - boxArea(a)
       })
-      boxes = boxes.slice(0, MAX_PIECES)
-      boxes.sort(function (left, right) {
-        var rowLeft = Math.round(left.y0 / (h * 0.22))
-        var rowRight = Math.round(right.y0 / (h * 0.22))
-        if (rowLeft !== rowRight) return rowLeft - rowRight
-        return left.x0 - right.x0
+      var merged = []
+      for (var i = 0; i < list.length; i += 1) {
+        var box = list[i]
+        var placed = false
+        for (var j = 0; j < merged.length; j += 1) {
+          if (overlapRatio(box, merged[j]) > 0.22) {
+            merged[j] = unionBox(merged[j], box)
+            placed = true
+            break
+          }
+        }
+        if (!placed) merged.push(box)
+      }
+      var changed = true
+      while (changed) {
+        changed = false
+        for (var a = 0; a < merged.length && !changed; a += 1) {
+          for (var b = a + 1; b < merged.length; b += 1) {
+            if (overlapRatio(merged[a], merged[b]) > 0.22) {
+              merged[a] = unionBox(merged[a], merged[b])
+              merged.splice(b, 1)
+              changed = true
+              break
+            }
+          }
+        }
+      }
+      return merged
+    }
+
+    function finishBoxes(pixelBoxes, width, height) {
+      var filtered = []
+      for (var i = 0; i < pixelBoxes.length; i += 1) {
+        var box = pixelBoxes[i]
+        if (box.x1 - box.x0 < 4 || box.y1 - box.y0 < 4) continue
+        filtered.push(box)
+      }
+      filtered.sort(function (a, b) {
+        return boxArea(b) - boxArea(a)
       })
-      var padX = Math.max(2, Math.round(w * 0.012))
-      var padY = Math.max(2, Math.round(h * 0.012))
-      return boxes.map(function (box, index) {
-        var x0 = Math.max(0, box.x0 - padX)
-        var y0 = Math.max(0, box.y0 - padY)
-        var x1 = Math.min(w - 1, box.x1 + padX)
-        var y1 = Math.min(h - 1, box.y1 + padY)
+      filtered = filtered.slice(0, MAX_PIECES)
+      filtered.sort(function (a, b) {
+        var rowA = Math.round(a.y0 / (height * 0.04))
+        var rowB = Math.round(b.y0 / (height * 0.04))
+        if (rowA !== rowB) return rowA - rowB
+        return a.x0 - b.x0
+      })
+      var pad = 2
+      return filtered.map(function (box, index) {
+        var x0 = Math.max(0, box.x0 - pad)
+        var y0 = Math.max(0, box.y0 - pad)
+        var x1 = Math.min(width, box.x1 + pad)
+        var y1 = Math.min(height, box.y1 + pad)
         return {
           label: '对象 ' + (index + 1),
-          bbox: [roundUnit(x0 / w), roundUnit(y0 / h), roundUnit((x1 - x0 + 1) / w), roundUnit((y1 - y0 + 1) / h)],
+          bbox: [roundUnit(x0 / width), roundUnit(y0 / height), roundUnit((x1 - x0) / width), roundUnit((y1 - y0) / height)],
         }
       })
     }
 
-    function localDetect(url) {
+    /**
+     * Tiled local detection. A big sprite sheet is split into overlapping
+     * ~700px tiles, each tile is analyzed at up to 640px (so small icons keep
+     * enough pixels), and the results are stitched back together. Yields
+     * between tiles so the panel can show progress instead of freezing.
+     */
+    function localDetect(url, onProgress) {
       return loadImage(url).then(function (image) {
-        return foregroundBoxes(image)
+        var width = image.naturalWidth || image.width
+        var height = image.naturalHeight || image.height
+        if (!width || !height) return []
+        var TARGET = 700
+        var OVERLAP = 90
+        var tilesX = Math.max(1, Math.ceil(width / TARGET))
+        var tilesY = Math.max(1, Math.ceil(height / TARGET))
+        var total = tilesX * tilesY
+        if (total <= 1) {
+          return finishBoxes(analyzeRegion(image, 0, 0, width, height), width, height)
+        }
+        var tileW = Math.ceil(width / tilesX)
+        var tileH = Math.ceil(height / tilesY)
+        var collected = []
+        var done = 0
+        function step() {
+          if (done >= total) {
+            return finishBoxes(mergeTileBoxes(collected), width, height)
+          }
+          var tx = done % tilesX
+          var ty = Math.floor(done / tilesX)
+          var rx = Math.max(0, tx * tileW - OVERLAP)
+          var ry = Math.max(0, ty * tileH - OVERLAP)
+          var rw = Math.min(width, (tx + 1) * tileW + OVERLAP) - rx
+          var rh = Math.min(height, (ty + 1) * tileH + OVERLAP) - ry
+          var found = analyzeRegion(image, rx, ry, rw, rh)
+          for (var index = 0; index < found.length; index += 1) collected.push(found[index])
+          done += 1
+          if (typeof onProgress === 'function') onProgress(done, total)
+          return new Promise(function (resolve) {
+            setTimeout(resolve, 0)
+          }).then(step)
+        }
+        return step()
       })
     }
 
@@ -1676,6 +1808,7 @@ window.__ModuleLoader__.load({
       var [drag, setDrag] = React.useState(null)
       var [drawKey, setDrawKey] = React.useState(null)
       var [zoomKey, setZoomKey] = React.useState(null)
+      var [piecePages, setPiecePages] = React.useState({})
       var queueRef = React.useRef(queue)
       queueRef.current = queue
 
@@ -1706,8 +1839,9 @@ window.__ModuleLoader__.load({
       }
 
       /* 1. Cut one box out of the staged original; the piece appears at once. */
-      function cropPiece(url, bbox, label, index) {
-        return cropImage(url, bbox, 768).then(function (crop) {
+      function cropPiece(url, bbox, label, index, total) {
+        var maxEdge = total > 300 ? 192 : total > 120 ? 256 : total > 40 ? 384 : 768
+        return cropImage(url, bbox, maxEdge).then(function (crop) {
           var name = label || t.manualObject + ' ' + (index + 1)
           return {
             id: 'p' + (index + 1),
@@ -1726,10 +1860,13 @@ window.__ModuleLoader__.load({
         })
       }
 
-      /* 2. AI naming for crops that already exist (names, categories, tags, notes). */
+      /* 2. AI naming for crops that already exist (names, categories, tags, notes).
+         Dense sheets are capped per run so one click does not fire hundreds of
+         model calls; the rest keep their numbered names. */
       function describe(key, stageId, pieces) {
         patchEntry(key, { status: 'describing', error: '' })
-        var payload = pieces.map(function (piece) {
+        var target = pieces.slice(0, NAMING_CAP)
+        var payload = target.map(function (piece) {
           return {
             data: piece.data,
             mediaType: piece.mediaType || 'image/png',
@@ -1742,6 +1879,7 @@ window.__ModuleLoader__.load({
           .then(function (result) {
             var annotations = result.pieces || []
             var merged = pieces.map(function (piece, index) {
+              if (index >= target.length) return piece
               var annotation = annotations[index] || {}
               return Object.assign({}, piece, {
                 id: annotation.pieceId || piece.id,
@@ -1760,6 +1898,7 @@ window.__ModuleLoader__.load({
               note: result.note || '',
               model: result.model || '',
               error: '',
+              progress: '',
             }
             if (result.usage) patch.usage = result.usage
             if (result.title) patch.name = result.title
@@ -1767,7 +1906,7 @@ window.__ModuleLoader__.load({
             patchEntry(key, patch)
           })
           .catch(function (error) {
-            patchEntry(key, { status: 'ready', error: failure(error) + t.nameFailedHint })
+            patchEntry(key, { status: 'ready', error: failure(error) + t.nameFailedHint, progress: '' })
           })
       }
 
@@ -1776,8 +1915,11 @@ window.__ModuleLoader__.load({
          be chosen in the dashboard when its boxes are better. Either way the
          crops happen immediately and naming is a separate pass. */
       function detectAndCrop(key, entry) {
-        patchEntry(key, { status: 'detecting', error: '', warning: '', pieces: [] })
+        patchEntry(key, { status: 'detecting', error: '', warning: '', pieces: [], progress: '' })
         var useModel = props.detector === 'model'
+        var progress = function (done, total) {
+          patchEntry(key, { progress: done + '/' + total })
+        }
         var boxesPromise
         if (useModel) {
           boxesPromise = postJson('/detect', { stageId: entry.stageId })
@@ -1785,12 +1927,12 @@ window.__ModuleLoader__.load({
               return { objects: result.objects || [], title: result.title, model: result.model }
             })
             .catch(function (error) {
-              return localDetect(entry.url).then(function (objects) {
+              return localDetect(entry.url, progress).then(function (objects) {
                 return { objects: objects, warning: t.modelFallback + ' ' + failure(error) }
               })
             })
         } else {
-          boxesPromise = localDetect(entry.url)
+          boxesPromise = localDetect(entry.url, progress)
             .then(function (objects) {
               return { objects: objects }
             })
@@ -1799,7 +1941,7 @@ window.__ModuleLoader__.load({
             })
         }
         return boxesPromise.then(function (result) {
-          var patch = { title: result.title || entry.name }
+          var patch = { title: result.title || entry.name, progress: '' }
           if (result.warning) patch.warning = result.warning
           patchEntry(key, patch)
           var objects = result.objects || []
@@ -1811,18 +1953,27 @@ window.__ModuleLoader__.load({
           var chain = Promise.resolve()
           objects.forEach(function (object, index) {
             chain = chain.then(function () {
-              return cropPiece(entry.url, object.bbox, object.label, index)
+              return cropPiece(entry.url, object.bbox, object.label, index, objects.length)
                 .then(function (piece) {
                   pieces.push(piece)
                 })
                 .catch(function () {
                   /* a bad box must not abort the rest */
                 })
+                .then(function () {
+                  if ((index + 1) % 20 === 0 || index + 1 === objects.length) {
+                    patchEntry(key, { pieces: pieces.slice(), progress: index + 1 + '/' + objects.length })
+                    return new Promise(function (resolve) {
+                      setTimeout(resolve, 0)
+                    })
+                  }
+                  return undefined
+                })
             })
           })
           return chain.then(function () {
             /* Stop here: the user checks the boxes before any model call. */
-            patchEntry(key, { pieces: pieces, status: 'review' })
+            patchEntry(key, { pieces: pieces, status: 'review', progress: '' })
           })
         })
       }
@@ -2112,6 +2263,7 @@ window.__ModuleLoader__.load({
       }
 
       function stage(entry) {
+        var showLabels = (entry.pieces || []).length <= 80
         var boxes = (entry.pieces || []).map(function (piece) {
           return h(
             'span',
@@ -2125,7 +2277,7 @@ window.__ModuleLoader__.load({
                 height: piece.bbox[3] * 100 + '%',
               },
             },
-            h('span', { className: 'al-boxLabel' }, piece.name),
+            showLabels ? h('span', { className: 'al-boxLabel' }, piece.name) : null,
           )
         })
         var preview = null
@@ -2169,15 +2321,16 @@ window.__ModuleLoader__.load({
       }
 
       function statusOf(entry) {
+        var progress = entry.progress ? ' ' + entry.progress : ''
         if (entry.status === 'preparing') return { text: t.preparing, busy: true }
         if (entry.status === 'staging') return { text: t.uploading, busy: true }
-        if (entry.status === 'detecting') return { text: t.detecting, busy: true }
-        if (entry.status === 'describing') return { text: t.describing + ' · ' + t.describingHint, busy: true }
+        if (entry.status === 'detecting') return { text: t.detecting + progress, busy: true }
+        if (entry.status === 'describing') return { text: t.describing + progress + ' · ' + t.describingHint, busy: true }
         if (entry.status === 'committing') return { text: t.committing, busy: true }
         if (entry.status === 'done') return { text: entry.saved > 0 ? t.savedSegments + ' ' + entry.saved : t.savedWhole, busy: false }
         if (entry.status === 'error') return { text: t.failed, busy: false }
         if (entry.status === 'duplicate') return { text: t.duplicate, busy: false }
-        if (entry.status === 'review') return { text: t.review, busy: false }
+        if (entry.status === 'review') return { text: t.review + (entry.pieces && entry.pieces.length ? ' · ' + entry.pieces.length : ''), busy: false }
         return { text: t.named, busy: false }
       }
 
@@ -2249,6 +2402,8 @@ window.__ModuleLoader__.load({
         var isDone = entry.status === 'done'
         var busy = entry.status === 'detecting' || entry.status === 'describing' || entry.status === 'staging' || entry.status === 'committing'
         var pieces = entry.pieces || []
+        var pageSize = piecePages[entry.key] || 60
+        var visiblePieces = pieces.slice(0, pageSize)
         var selectedCount = pieces.filter(function (piece) {
           return piece.selected
         }).length
@@ -2409,16 +2564,41 @@ window.__ModuleLoader__.load({
                       : h(
                           'div',
                           { className: 'al-pieceList' },
-                          pieces.map(function (piece) {
+                          visiblePieces.map(function (piece) {
                             return pieceRow(entry, piece)
                           }),
+                          pieces.length > visiblePieces.length
+                            ? h(
+                                'div',
+                                { className: 'al-toolbar', style: { justifyContent: 'center', padding: '4px' } },
+                                h(
+                                  Button,
+                                  {
+                                    onClick: function () {
+                                      setPiecePages(function (current) {
+                                        var next = Object.assign({}, current)
+                                        next[entry.key] = (current[entry.key] || 60) + 120
+                                        return next
+                                      })
+                                    },
+                                  },
+                                  t.loadMore + ' (' + (pieces.length - visiblePieces.length) + ')',
+                                ),
+                              )
+                            : null,
                         ),
                   ),
                   isReview
                     ? h(
                         'div',
                         { className: 'al-toolbar' },
-                        h('span', { className: 'al-muted' }, t.reviewHint),
+                        h(
+                          'span',
+                          { className: 'al-muted' },
+                          pieces.length > NAMING_CAP
+                            ? t.namingCapHint.replace('{cap}', String(NAMING_CAP)).replace('{n}', String(pieces.length))
+                            : t.reviewHint,
+                        ),
                         h('span', { className: 'al-spacer' }),
                         pieces.length > 0
                           ? h(
@@ -2429,7 +2609,11 @@ window.__ModuleLoader__.load({
                                   describe(entry.key, entry.stageId, pieces)
                                 },
                               },
-                              t.aiName + ' (' + pieces.length + ')',
+                              t.aiName +
+                                ' (' +
+                                Math.min(pieces.length, NAMING_CAP) +
+                                (pieces.length > NAMING_CAP ? '/' + pieces.length : '') +
+                                ')',
                             )
                           : null,
                         h(
@@ -2476,7 +2660,11 @@ window.__ModuleLoader__.load({
                                   describe(entry.key, entry.stageId, pieces)
                                 },
                               },
-                              t.renameAi,
+                              t.renameAi +
+                                ' (' +
+                                Math.min(pieces.length, NAMING_CAP) +
+                                (pieces.length > NAMING_CAP ? '/' + pieces.length : '') +
+                                ')',
                             )
                           : null,
                       )

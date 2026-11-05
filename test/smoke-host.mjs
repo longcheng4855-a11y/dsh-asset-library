@@ -287,6 +287,23 @@ const afterDelete = await call('/asset-library/state', 'GET')
 check('batch delete', batchDelete.status + ' deleted=' + batchDelete.json.deleted + ' left=' + afterDelete.json.items.length)
 check('empty categories kept', JSON.stringify(afterDelete.json.categories))
 
+const manyCommit = await call('/asset-library/commit', 'POST', {
+  stageId: stagedMany.json.stageId,
+  source: { name: '批量原图', category: '批量', tags: [], note: '' },
+  pieces: manyPieces.map((piece, index) => ({
+    pieceId: 'p' + (index + 1),
+    name: '批量切图 ' + (index + 1),
+    category: '批量',
+    tags: [],
+    note: '',
+    bbox: piece.bbox,
+    w: 1,
+    h: 1,
+    data: piece.data,
+  })),
+})
+check('large commit', manyCommit.status + ' created=' + (manyCommit.json.items ? manyCommit.json.items.length : JSON.stringify(manyCommit.json)))
+
 const tool = tools[0]
 const toolOut = await tool.execute({ action: 'search', query: '红色' }, {})
 check('tool search', toolOut.text.split('\n').slice(0, 2).join(' | '))
