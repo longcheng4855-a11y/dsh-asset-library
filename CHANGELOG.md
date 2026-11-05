@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- 安装不再依赖 git：文档与 MCP 行改用 GitHub 源码压缩包（`archive/refs/tags/vX.Y.Z.tar.gz`），没有安装 Git for Windows 的机器也能通过链接安装。
+- 修复 `ERR_PNPM_GIT_RESOLVE_FAILED: git ls-remote failed` 的安装路径。
+
 ## 0.6.0
 
 - 导出素材到游戏项目：原生工具 `asset_library {action:"export"}`、MCP `export_assets`、HTTP `/asset-library/export`；复制文件并写 `harness-assets.json`。

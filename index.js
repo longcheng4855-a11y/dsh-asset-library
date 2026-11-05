@@ -21,7 +21,7 @@ import { detectObjects, describePieces, MAX_OBJECTS } from './lib/analyze.js'
 export const name = 'asset-library'
 export const inject = ['webServer']
 
-const VERSION = '0.6.0'
+const VERSION = '0.6.1'
 const ROUTE = '/asset-library'
 const SMALL_BODY = 128 * 1024
 const UPLOAD_BODY = 40 * 1024 * 1024
