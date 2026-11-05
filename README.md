@@ -51,6 +51,12 @@ asset_library {action:"export", ids:["ast_xxx","ast_yyy"], destination:"D:\\MyGa
   - `assets/` 切图
 - 诊断：`%DSH_HOME%\asset-library\last-boot.json`（启动时探测到的模型）、`last-call.json`（最近一次模型调用：finish 原因、文本/推理长度与预览，用于排查“模型没有返回内容”）
 
+## 安装
+
+- 在 Harness 的插件管理里按 git 地址添加：`git+https://github.com/longcheng4855-a11y/dsh-asset-library.git`；
+- 或者把仓库克隆/下载到任意目录，在插件管理里选择该目录安装；
+- 安装后左侧菜单出现「资产库」，首次打开先选择素材库文件夹。
+
 ## MCP 行
 
 `cordis.patch.yml` 里的 `asset-library-mcp` 行通过 `@deepseek-ai/dsh-mcp-client` 以 stdio 启动本包的 `mcp-server.js`，参数写的是本机绝对路径。若把本包移动到别的位置，请同步修改该行的 `args`。
