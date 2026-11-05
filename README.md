@@ -22,6 +22,7 @@
 - **素材库**：搜索、按类型/多标签（可多选）过滤、排序（最新/最早/名称/尺寸）、大图预览、改名/改分类/改标签/改注释、删除、复制路径。
 - **批量操作**：素材库工具栏「批量选择」后勾选多张，可全选当前筛选结果、清空、批量改分类、批量加标签、批量复制路径、批量删除（带确认）。
 - **Token 用量**：每次「AI 识别并命名」后，卡片上显示这次消耗的 token；仪表盘「AI 用量」累计显示调用次数与输入/输出 token 总数（数据存在 `library.json` 的 `usage` 里，不会丢）。
+- **调用统计（百分比仪表盘）**：仪表盘新增「调用统计」：环形百分比显示**调用成功率**和**素材使用率**（被调用过的素材 / 全部素材），另显示总调用次数、今日次数、最近 7 天柱状图和按操作（检索/分类/详情/导出/读图）的细分。原生工具和 MCP 调用都会记录（`%DSH_HOME%\asset-library\usage.log`，JSONL，两个进程各自追加，互不干扰）。
 - **启用/禁用**：面板右上角开关。禁用后 AI 看不到系统提示里的素材库段，工具也会明确拒绝。
 - **给 AI 用**：
   - 原生工具 `asset_library`（search / categories / stats / recent / get / export），返回素材绝对路径，配合 `read_image` 看图；
@@ -57,7 +58,7 @@ asset_library {action:"export", ids:["ast_xxx","ast_yyy"], destination:"D:\\MyGa
 - **从链接安装（推荐，不需要安装 git）**：在 Harness 插件管理的「从链接安装 / 添加插件」里粘贴：
 
   ```text
-  https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.6.tar.gz
+  https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.10.0.tar.gz
   ```
 
   这是仓库的源码压缩包地址，pnpm 直接 HTTPS 下载解包，不调用 `git`。如果粘贴 `git+https://...` 或仓库地址而机器上没装 git，会报 `git ls-remote failed: 'git' 不是内部或外部命令`。
@@ -73,7 +74,7 @@ asset_library {action:"export", ids:["ast_xxx","ast_yyy"], destination:"D:\\MyGa
 command: npx
 args:
   - '-y'
-  - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.6.tar.gz'
+  - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.10.0.tar.gz'
   - 'dsh-asset-library-mcp'
 ```
 

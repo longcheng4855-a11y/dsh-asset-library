@@ -18,13 +18,14 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import * as store from './lib/store.js'
+import * as usageStats from './lib/usage.js'
 import { exportAssets } from './lib/export.js'
 import { detectObjects, describePieces, MAX_OBJECTS } from './lib/analyze.js'
 
 export const name = 'asset-library'
 export const inject = ['webServer']
 
-const VERSION = '0.9.6'
+const VERSION = '0.10.0'
 const SEGMENT_SCRIPT = fileURLToPath(new URL('./lib/segment.py', import.meta.url))
 const ROUTE = '/asset-library'
 const SMALL_BODY = 128 * 1024
@@ -244,8 +245,34 @@ async function resolveAnalysisRoute(runtime) {
 
 /* ── snapshot ─────────────────────────────────────────────────────────── */
 
+async function usageSnapshot(runtime) {
+  const now = Date.now()
+  if (runtime.usageCache && now - runtime.usageCache.at < 5000) return runtime.usageCache.value
+  const value = await usageStats.readUsage()
+  runtime.usageCache = { at: now, value }
+  return value
+}
+
+function callsView(usage, coverage) {
+  return {
+    total: usage.total,
+    ok: usage.ok,
+    failed: usage.failed,
+    rate: usage.rate,
+    usedCount: usage.usedCount,
+    coverage: coverage,
+    byAction: usage.byAction,
+    sources: usage.sources,
+    daily: usage.daily,
+    today: usage.today,
+    lastAt: usage.lastAt,
+    week: usageStats.lastWeek(usage.daily),
+  }
+}
+
 async function snapshot(runtime) {
   const config = await store.readConfig()
+  const usage = await usageSnapshot(runtime)
   const base = {
     ok: true,
     version: VERSION,
@@ -264,6 +291,7 @@ async function snapshot(runtime) {
     tags: [],
     recent: [],
     stats: { total: 0, originals: 0, segments: 0, categories: 0, tags: 0, last7: 0 },
+    calls: callsView(usage, 0),
   }
   if (!config.libraryPath) return base
   let state
@@ -295,6 +323,7 @@ async function snapshot(runtime) {
     recent,
     tags: store.uniqueTags(items),
     stats,
+    calls: callsView(usage, items.length > 0 ? Math.round((usage.usedCount / items.length) * 1000) / 10 : 0),
   }
 }
 
@@ -1505,7 +1534,10 @@ function searchItems(items, args) {
   return { total: scored.length, rows: scored.slice(0, limit).map((entry) => entry.item) }
 }
 
-async function runTool(runtime, args) {
+async function runTool(runtime, args, onIds) {
+  const reportIds = (ids) => {
+    if (typeof onIds === 'function' && Array.isArray(ids)) onIds(ids)
+  }
   const config = await store.readConfig()
   if (!config.libraryPath) {
     return { text: '素材库还没有设置路径。请让用户在左侧菜单打开「资产库」面板，先选择素材库文件夹。' }
@@ -1547,6 +1579,7 @@ async function runTool(runtime, args) {
     const id = typeof args.id === 'string' ? args.id : ''
     const item = items.find((entry) => entry.id === id)
     if (!item) return { text: `没有找到 id 为 ${id || '(空)'} 的素材。可先用 search 检索。` }
+    reportIds([item.id])
     const lines = [head, summarizeItem(item, 0), `id：${item.id}`, `创建：${new Date(item.createdAt).toLocaleString('zh-CN')}`]
     if (item.bbox) lines.push(`原图归一化位置：${item.bbox.map((n) => n.toFixed(3)).join(', ')}`)
     lines.push('需要预览时对路径调用 read_image。')
@@ -1556,6 +1589,7 @@ async function runTool(runtime, args) {
   if (action === 'recent') {
     const recent = [...items].sort((a, b) => b.createdAt - a.createdAt).slice(0, Math.min(20, Math.max(1, Number(args.limit) || 10)))
     if (recent.length === 0) return { text: `${head}\n还没有素材。` }
+    reportIds(recent.map((item) => item.id))
     return { text: [head, '最近入库：', ...recent.map((item, index) => summarizeItem(item, index)), '需要预览时对路径调用 read_image。'].join('\n') }
   }
 
@@ -1570,6 +1604,7 @@ async function runTool(runtime, args) {
       return { text: '没有匹配的素材可导出。先用 action:"search" 找到素材 id，再用 action:"export" 加 ids 导出。' }
     }
     const result = await exportAssets({ libraryPath: config.libraryPath, items: chosen, destination })
+    reportIds(chosen.map((item) => item.id))
     const lines = [
       `已导出 ${result.exported.length} 个素材到：${result.destination}`,
       `清单文件：${result.manifest}`,
@@ -1585,6 +1620,7 @@ async function runTool(runtime, args) {
       text: `${head}\n没有匹配「${typeof args.query === 'string' ? args.query : ''}」的素材。可以换关键词，或先用 action:"categories" 看现有分类。`,
     }
   }
+  reportIds(result.rows.map((row) => row.id))
   const lines = [`${head}，命中 ${result.total} 个，显示前 ${result.rows.length} 个：`]
   for (let index = 0; index < result.rows.length; index += 1) {
     lines.push(summarizeItem(result.rows[index], index))
@@ -1643,9 +1679,18 @@ function registerTool(runtime) {
         },
         async execute(args) {
           const safe = args && typeof args === 'object' ? args : {}
+          const action = typeof safe.action === 'string' ? safe.action : 'search'
+          let ids = []
           try {
-            return await runTool(runtime, safe)
+            const result = await runTool(runtime, safe, (found) => {
+              ids = found
+            })
+            await usageStats.recordCall({ source: 'tool', action, ok: true, ids })
+            runtime.usageCache = null
+            return result
           } catch (error) {
+            await usageStats.recordCall({ source: 'tool', action, ok: false, ids: [] })
+            runtime.usageCache = null
             return { text: `素材库读取失败：${errorMessage(error)}` }
           }
         },

@@ -10,9 +10,10 @@
 import readline from 'node:readline'
 import fsp from 'node:fs/promises'
 import * as store from './lib/store.js'
+import * as usage from './lib/usage.js'
 import { exportAssets } from './lib/export.js'
 
-const SERVER_INFO = { name: 'asset-library', version: '0.9.6' }
+const SERVER_INFO = { name: 'asset-library', version: '0.10.0' }
 const PROTOCOL_VERSION = '2025-06-18'
 const MAX_INLINE_IMAGE_BYTES = 8 * 1024 * 1024
 
@@ -113,6 +114,13 @@ function findItem(items, id) {
   const item = items.find((entry) => entry.id === id)
   if (!item) throw new Error(`没有找到 id 为 ${id || '(空)'} 的素材`)
   return item
+}
+
+function toolIds(name, args) {
+  if (!args || typeof args !== 'object') return []
+  if ((name === 'get_asset' || name === 'read_asset') && typeof args.id === 'string') return [args.id]
+  if (name === 'export_assets' && Array.isArray(args.ids)) return args.ids.filter((id) => typeof id === 'string')
+  return []
 }
 
 async function callTool(name, args) {
@@ -266,8 +274,11 @@ async function handle(message) {
     const name = params && typeof params.name === 'string' ? params.name : ''
     const args = params && params.arguments && typeof params.arguments === 'object' ? params.arguments : {}
     try {
-      reply(id, await callTool(name, args))
+      const result = await callTool(name, args)
+      await usage.recordCall({ source: 'mcp', action: name, ok: true, ids: toolIds(name, args) })
+      reply(id, result)
     } catch (error) {
+      await usage.recordCall({ source: 'mcp', action: name, ok: false, ids: [] })
       reply(id, textResult(`素材库读取失败：${String((error && error.message) || error)}`))
     }
     return

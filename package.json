@@ -1,6 +1,6 @@
 {
   "name": "dsh-asset-library",
-  "version": "0.9.6",
+  "version": "0.10.0",
   "description": "Asset library for DeepSeek Harness: drop or paste images, crop objects locally or with a vision model, let the model name and classify the crops, browse them in a category tree, and let the agent search, read and export the material into Godot / Unity / web projects.",
   "type": "module",
   "license": "MIT",

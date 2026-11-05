@@ -152,6 +152,13 @@ window.__ModuleLoader__.load({
         usageBadge: 'tokens',
         usageHint: '本次 AI 识别消耗的输入/输出 token',
         usageEmpty: '还没有调用过模型',
+        usageStatsTitle: '调用统计',
+        callRate: '调用成功率',
+        coverage: '素材使用率',
+        callsTotal: '调用次数',
+        todayCalls: '今日',
+        okFailed: '成功 {ok} · 失败 {failed}',
+        callEmpty: '还没有素材调用记录。AI 使用 asset_library 检索或导出素材后，这里会显示次数、成功率和覆盖率。',
         namingCapHint: '切图较多（{n} 个）：每次 AI 命名处理 {cap} 个，命名后可继续下一批或重新生成这一批',
         duplicate: '已在素材库中',
         duplicateHint: '这张图片已经导入过，未重复入库：',
@@ -340,6 +347,13 @@ window.__ModuleLoader__.load({
         usageBadge: 'tokens',
         usageHint: 'Input/output tokens spent by this AI pass',
         usageEmpty: 'No model calls yet',
+        usageStatsTitle: 'Call statistics',
+        callRate: 'Success rate',
+        coverage: 'Assets used',
+        callsTotal: 'Calls',
+        todayCalls: 'today',
+        okFailed: '{ok} ok · {failed} failed',
+        callEmpty: 'No asset calls yet. After the agent uses asset_library, the count, success rate and coverage show up here.',
         namingCapHint: 'Many pieces ({n}): each AI run names {cap}; afterwards you can continue with the next batch or regenerate this one',
         duplicate: 'Already in the library',
         duplicateHint: 'This image was imported before, so it was skipped:',
@@ -443,6 +457,16 @@ window.__ModuleLoader__.load({
       '.al-card{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:10px 12px;background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;gap:2px;min-width:0}',
       '.al-cardValue{font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.2}',
       '.al-cardLabel{font-size:11px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.al-gauges{display:flex;gap:10px;flex-wrap:wrap}',
+      '.al-gauge{flex:1 1 110px;min-width:110px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 8px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-2)}',
+      '.al-gaugePlain{justify-content:center;min-height:132px}',
+      '.al-gaugeValue{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary)}',
+      '.al-gaugeLabel{font-size:12px;color:var(--dsw-alias-label-secondary);text-align:center}',
+      '.al-gaugeSub{font-size:11px;color:var(--dsw-alias-label-tertiary);text-align:center}',
+      '.al-week{display:flex;gap:6px;align-items:flex-end;height:62px;margin-top:10px;padding:0 4px}',
+      '.al-weekCol{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px}',
+      '.al-weekBar{width:100%;max-width:22px;background:var(--dsw-alias-brand-primary);border-radius:3px;opacity:.75}',
+      '.al-weekDay{font-size:10px;color:var(--dsw-alias-label-tertiary)}',
       '.al-section{display:flex;flex-direction:column;gap:9px;margin-top:18px}',
       '.al-sectionTitle{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600}',
       '.al-muted{font-size:11.5px;color:var(--dsw-alias-label-secondary)}',
@@ -1213,6 +1237,84 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /** Percentage ring used by the call-statistics dashboard. */
+    function Gauge(props) {
+      var value = Math.max(0, Math.min(100, Number(props.value) || 0))
+      var radius = 26
+      var circumference = 2 * Math.PI * radius
+      var dash = (value / 100) * circumference
+      return h(
+        'div',
+        { className: 'al-gauge' },
+        h(
+          'svg',
+          { width: 76, height: 76, viewBox: '0 0 72 72' },
+          h('circle', {
+            cx: 36,
+            cy: 36,
+            r: radius,
+            fill: 'none',
+            stroke: 'var(--dsw-alias-border-l1, rgba(128,128,128,0.3))',
+            strokeWidth: 7,
+          }),
+          h('circle', {
+            cx: 36,
+            cy: 36,
+            r: radius,
+            fill: 'none',
+            stroke: props.color || 'var(--dsw-alias-brand-primary, #3964ff)',
+            strokeWidth: 7,
+            strokeLinecap: 'round',
+            strokeDasharray: dash.toFixed(2) + ' ' + (circumference - dash).toFixed(2),
+            transform: 'rotate(-90 36 36)',
+          }),
+          h(
+            'text',
+            {
+              x: 36,
+              y: 41,
+              textAnchor: 'middle',
+              fontSize: '16',
+              fill: 'var(--dsw-alias-label-primary, currentColor)',
+            },
+            (Math.round(value * 10) / 10) + '%',
+          ),
+        ),
+        h('div', { className: 'al-gaugeLabel' }, props.label),
+        props.sub ? h('div', { className: 'al-gaugeSub' }, props.sub) : null,
+      )
+    }
+
+    var ACTION_LABELS_ZH = {
+      search: '检索',
+      categories: '分类',
+      stats: '概览',
+      recent: '最近',
+      get: '详情',
+      export: '导出',
+      search_assets: '检索',
+      list_categories: '分类',
+      library_stats: '概览',
+      get_asset: '详情',
+      read_asset: '读图',
+      export_assets: '导出',
+    }
+
+    var ACTION_LABELS_EN = {
+      search: 'Search',
+      categories: 'Categories',
+      stats: 'Stats',
+      recent: 'Recent',
+      get: 'Detail',
+      export: 'Export',
+      search_assets: 'Search',
+      list_categories: 'Categories',
+      library_stats: 'Stats',
+      get_asset: 'Detail',
+      read_asset: 'Read',
+      export_assets: 'Export',
+    }
+
     function StatusLine(props) {
       var spinning = props.busy === true
       return h(
@@ -1339,6 +1441,16 @@ window.__ModuleLoader__.load({
       var tree = snapshot.tree || []
       var recent = snapshot.recent || []
       var maxCount = tree.length > 0 ? tree[0].count : 1
+      var calls = snapshot.calls || {}
+      var week = calls.week || []
+      var weekMax = 1
+      for (var wi = 0; wi < week.length; wi += 1) {
+        if ((week[wi].count || 0) > weekMax) weekMax = week[wi].count
+      }
+      var actionLabels = props.lang === 'en' ? ACTION_LABELS_EN : ACTION_LABELS_ZH
+      var actionKeys = Object.keys(calls.byAction || {}).sort(function (a, b) {
+        return (calls.byAction[b] || 0) - (calls.byAction[a] || 0)
+      })
 
       return h(
         'div',
@@ -1396,6 +1508,73 @@ window.__ModuleLoader__.load({
                     h('span', { className: 'al-barCount' }, String(node.count)),
                   )
                 }),
+              ),
+        ),
+        h(
+          'div',
+          { className: 'al-section' },
+          h(
+            'div',
+            { className: 'al-sectionTitle' },
+            t.usageStatsTitle,
+            h('span', { className: 'al-badge' }, String(calls.total || 0)),
+          ),
+          (calls.total || 0) === 0
+            ? h('div', { className: 'al-muted' }, t.callEmpty)
+            : h(
+                'div',
+                null,
+                h(
+                  'div',
+                  { className: 'al-gauges' },
+                  h(Gauge, {
+                    value: calls.rate || 0,
+                    label: t.callRate,
+                    sub: (t.okFailed || '')
+                      .replace('{ok}', String(calls.ok || 0))
+                      .replace('{failed}', String(calls.failed || 0)),
+                  }),
+                  h(Gauge, {
+                    value: calls.coverage || 0,
+                    label: t.coverage,
+                    sub: (calls.usedCount || 0) + ' / ' + items.length,
+                    color: 'var(--dsw-alias-state-success-primary, #2fb344)',
+                  }),
+                  h(
+                    'div',
+                    { className: 'al-gauge al-gaugePlain' },
+                    h('div', { className: 'al-gaugeValue' }, String(calls.total || 0)),
+                    h('div', { className: 'al-gaugeLabel' }, t.callsTotal),
+                    h('div', { className: 'al-gaugeSub' }, t.todayCalls + ' ' + (calls.today || 0)),
+                  ),
+                ),
+                week.length > 0
+                  ? h(
+                      'div',
+                      { className: 'al-week' },
+                      week.map(function (entry) {
+                        return h(
+                          'div',
+                          { className: 'al-weekCol', key: entry.day },
+                          h('div', {
+                            className: 'al-weekBar',
+                            style: { height: Math.max(2, Math.round(((entry.count || 0) / weekMax) * 38)) + 'px' },
+                            title: String(entry.day || '') + ' · ' + (entry.count || 0),
+                          }),
+                          h('div', { className: 'al-weekDay' }, String(entry.day || '').slice(5)),
+                        )
+                      }),
+                    )
+                  : null,
+                actionKeys.length > 0
+                  ? h(
+                      'div',
+                      { className: 'al-toolbar', style: { marginTop: '6px', flexWrap: 'wrap' } },
+                      actionKeys.map(function (key) {
+                        return h('span', { className: 'al-chip', key: key }, (actionLabels[key] || key) + ' ' + (calls.byAction[key] || 0))
+                      }),
+                    )
+                  : null,
               ),
         ),
         h(
@@ -3963,6 +4142,7 @@ window.__ModuleLoader__.load({
               { style: { display: view === 'dashboard' ? 'block' : 'none' } },
               h(Dashboard, {
                 t: t,
+                lang: lang,
                 snapshot: snapshot,
                 modelText: modelText(),
                 onOpen: function (item) {

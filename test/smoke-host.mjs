@@ -341,6 +341,21 @@ const toolOut = await tool.execute({ action: 'search', query: '红色' }, {})
 check('tool search', toolOut.text.split('\n').slice(0, 2).join(' | '))
 const toolCats = await tool.execute({ action: 'categories' }, {})
 check('tool categories', toolCats.text.split('\n').slice(0, 3).join(' | '))
+const toolRecent = await tool.execute({ action: 'recent', limit: 5 }, {})
+check('tool recent', toolRecent.text.split('\n').slice(0, 2).join(' | '))
+
+const afterTools = await call('/asset-library/state', 'GET')
+check(
+  'calls recorded',
+  JSON.stringify(
+    afterTools.json.calls && {
+      total: afterTools.json.calls.total,
+      rate: afterTools.json.calls.rate,
+      coverage: afterTools.json.calls.coverage,
+      byAction: afterTools.json.calls.byAction,
+    },
+  ),
+)
 
 const prompt = sections[0].text()
 check('prompt text', prompt.split('\n')[0] + ' ... (' + prompt.length + ' chars)')
