@@ -1,21 +1,26 @@
 - insert:
     - id: asset-library
       name: dsh-asset-library
-    # MCP face. It is fetched from the public repository with npx, so this row
-    # works on any machine without editing a local path. The tarball URL is used
-    # instead of `github:...` because npx resolves `github:` specs through git,
-    # and some machines do not have git installed. Update the version in the URL
-    # when a new release is published. If the machine is offline the MCP tools
-    # stay unavailable; the native `asset_library` tool does not depend on this.
+    # Optional MCP face, DISABLED by default: this row starts `npx`, which
+    # downloads the package tarball on first use. On a slow or blocked network
+    # that download can hold up the whole application at startup (stuck panel,
+    # history not loading, "task still running" on quit), so the native
+    # `asset_library` tool is the default integration instead.
+    #
+    # To use the MCP tools, enable this row in the plugin manager (or set
+    # `disabled: false` here). The tarball URL is used instead of `github:`
+    # because npx resolves `github:` specs through git and some machines have no
+    # git installed. Update the version in the URL when a release is published.
     - id: asset-library-mcp
       name: '@deepseek-ai/dsh-mcp-client'
+      disabled: true
       config:
         transport: stdio
         serverName: assetlib
         command: npx
         args:
           - '-y'
-          - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.4.tar.gz'
+          - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.5.tar.gz'
           - 'dsh-asset-library-mcp'
         toolCallTimeoutMs: 30000
         failOnStartupError: false

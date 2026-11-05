@@ -12,7 +12,7 @@ import fsp from 'node:fs/promises'
 import * as store from './lib/store.js'
 import { exportAssets } from './lib/export.js'
 
-const SERVER_INFO = { name: 'asset-library', version: '0.9.4' }
+const SERVER_INFO = { name: 'asset-library', version: '0.9.5' }
 const PROTOCOL_VERSION = '2025-06-18'
 const MAX_INLINE_IMAGE_BYTES = 8 * 1024 * 1024
 

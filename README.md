@@ -57,7 +57,7 @@ asset_library {action:"export", ids:["ast_xxx","ast_yyy"], destination:"D:\\MyGa
 - **从链接安装（推荐，不需要安装 git）**：在 Harness 插件管理的「从链接安装 / 添加插件」里粘贴：
 
   ```text
-  https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.4.tar.gz
+  https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.5.tar.gz
   ```
 
   这是仓库的源码压缩包地址，pnpm 直接 HTTPS 下载解包，不调用 `git`。如果粘贴 `git+https://...` 或仓库地址而机器上没装 git，会报 `git ls-remote failed: 'git' 不是内部或外部命令`。
@@ -73,10 +73,11 @@ asset_library {action:"export", ids:["ast_xxx","ast_yyy"], destination:"D:\\MyGa
 command: npx
 args:
   - '-y'
-  - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.4.tar.gz'
+  - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.5.tar.gz'
   - 'dsh-asset-library-mcp'
 ```
 
+- **这一行默认是 `disabled: true`**：`npx` 首次拉取压缩包在慢网/断网环境会拖住应用启动，所以默认不启用；需要 MCP 工具时在插件管理里启用 `asset-library-mcp`（或把 `disabled` 改成 `false`）。
 - 原生工具 `asset_library` 不依赖 MCP；离线时只有 `mcp__assetlib__*` 不可用。
 - 发布新版本时，把这里的版本号改成新 tag 即可。
 - 想用本地已安装的副本（启动更快、不联网），在 profile 的 `cordis.patch.yml` 里覆盖同一行：

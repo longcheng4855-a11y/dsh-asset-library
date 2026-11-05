@@ -3570,7 +3570,7 @@ window.__ModuleLoader__.load({
 
       React.useEffect(
         function () {
-          request('/python-check')
+          request('/python-check', undefined, 8000)
             .then(function (info) {
               setPythonInfo(info)
             })
@@ -3585,7 +3585,7 @@ window.__ModuleLoader__.load({
         function () {
           if (!setup || setup.state !== 'running') return undefined
           var timer = setInterval(function () {
-            request('/python-status')
+            request('/python-status', undefined, 8000)
               .then(function (status) {
                 setSetup(status)
                 if (status.state === 'done') {
