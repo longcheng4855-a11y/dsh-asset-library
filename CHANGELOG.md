@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0
+
+- 新增 **Python 分割引擎**（默认）：`lib/segment.py` 优先用 OpenCV 轮廓找框，没有 OpenCV 时退回网格投影/连通域；实测 500 个对象的精灵表 0.4 秒切完，像素级精修比浏览器版本准得多。
+- 仪表盘「对象识别」增加「Python 识别」并设为默认；Python 不可用时自动回退浏览器识别。
+- 新增 `POST /asset-library/detect-local` 路由；可用环境变量 `DSH_ASSET_PYTHON` 指定解释器，默认依次尝试 `python`、`py -3`。
+- 浏览器分区识别保留作为无 Python 环境的兜底。
+
 ## 0.8.0
 
 - 单图切图上限 24 → 1000。

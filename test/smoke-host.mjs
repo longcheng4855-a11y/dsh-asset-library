@@ -157,7 +157,7 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const results = []
 const check = (label, value) => results.push([label, value])
 
-check('routes registered', routes.size === 13 ? 'yes (' + routes.size + ')' : 'NO ' + routes.size)
+check('routes registered', routes.size === 14 ? 'yes (' + routes.size + ')' : 'NO ' + routes.size)
 check('tools registered', tools.length === 1 ? tools[0].name : 'NO')
 check('prompt sections', sections.length === 1 ? sections[0].name + '@' + sections[0].order : 'NO')
 
@@ -184,6 +184,25 @@ check('stage not in library', (await call('/asset-library/state', 'GET')).json.i
 const detected = await call('/asset-library/detect', 'POST', { stageId })
 check('detect status', detected.status + ' title=' + (detected.json.title || detected.json.error))
 check('detect objects', JSON.stringify(detected.json.objects || []))
+
+const stagedPy = await call('/asset-library/stage', 'POST', {
+  name: 'py',
+  mediaType: 'image/png',
+  data: png.toString('base64'),
+  width: 2,
+  height: 2,
+  hash: 'testhash-py',
+})
+const pyDetect = await call('/asset-library/detect-local', 'POST', { stageId: stagedPy.json.stageId })
+check(
+  'python detect',
+  pyDetect.status +
+    ' engine=' +
+    (pyDetect.json.engine || '-') +
+    ' objects=' +
+    (pyDetect.json.objects ? pyDetect.json.objects.length : '-') +
+    (pyDetect.json.error ? ' error=' + pyDetect.json.error : ''),
+)
 check('prepare/stream match', JSON.stringify(lastCall) + ' => ' + JSON.stringify(dispatched))
 
 const described = await call('/asset-library/describe', 'POST', {

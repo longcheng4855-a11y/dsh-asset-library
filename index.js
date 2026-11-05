@@ -14,6 +14,8 @@
 import fsp from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import * as store from './lib/store.js'
 import { exportAssets } from './lib/export.js'
 import { detectObjects, describePieces, MAX_OBJECTS } from './lib/analyze.js'
@@ -21,7 +23,8 @@ import { detectObjects, describePieces, MAX_OBJECTS } from './lib/analyze.js'
 export const name = 'asset-library'
 export const inject = ['webServer']
 
-const VERSION = '0.8.0'
+const VERSION = '0.9.0'
+const SEGMENT_SCRIPT = fileURLToPath(new URL('./lib/segment.py', import.meta.url))
 const ROUTE = '/asset-library'
 const SMALL_BODY = 128 * 1024
 const UPLOAD_BODY = 40 * 1024 * 1024
@@ -365,7 +368,7 @@ function configHandler(runtime) {
       }
       const patch = {}
       if (typeof body.enabled === 'boolean') patch.enabled = body.enabled
-      if (body.detector === 'local' || body.detector === 'model') patch.detector = body.detector
+      if (body.detector === 'python' || body.detector === 'local' || body.detector === 'model') patch.detector = body.detector
       if (body.analysis === null) {
         patch.analysis = { provider: '', model: '' }
       } else if (body.analysis && typeof body.analysis === 'object') {
@@ -506,6 +509,188 @@ function stageHandler(runtime) {
       })
     } catch (error) {
       sendJson(response, 500, { ok: false, error: errorMessage(error) })
+    }
+  }
+}
+
+/* ── Python segmentation ──────────────────────────────────────────────── */
+
+function pythonCandidates() {
+  const list = []
+  const custom = process.env.DSH_ASSET_PYTHON
+  if (typeof custom === 'string' && custom.trim()) list.push({ command: custom.trim(), args: [] })
+  list.push({ command: 'python', args: [] })
+  list.push({ command: 'py', args: ['-3'] })
+  return list
+}
+
+function probePython(candidate) {
+  return new Promise((resolve) => {
+    let settled = false
+    const done = (value) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    let child
+    try {
+      child = spawn(candidate.command, [...candidate.args, '-c', 'import sys, numpy, PIL; print(sys.version_info[0])'], {
+        windowsHide: true,
+      })
+    } catch {
+      done(false)
+      return
+    }
+    let out = ''
+    const timer = setTimeout(() => {
+      try {
+        child.kill()
+      } catch {
+        /* ignore */
+      }
+      done(false)
+    }, 8000)
+    child.stdout.on('data', (chunk) => {
+      out += chunk.toString()
+    })
+    child.on('error', () => {
+      clearTimeout(timer)
+      done(false)
+    })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      done(code === 0 && out.trim().startsWith('3'))
+    })
+  })
+}
+
+async function resolvePython(runtime) {
+  if (runtime.python !== undefined) return runtime.python
+  for (const candidate of pythonCandidates()) {
+    if (await probePython(candidate)) {
+      runtime.python = candidate
+      return candidate
+    }
+  }
+  runtime.python = null
+  return null
+}
+
+function runSegment(candidate, imagePath, maxObjects, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    let child
+    try {
+      child = spawn(
+        candidate.command,
+        [...candidate.args, SEGMENT_SCRIPT, imagePath, '--max', String(maxObjects)],
+        { windowsHide: true },
+      )
+    } catch (error) {
+      reject(error)
+      return
+    }
+    let out = ''
+    let err = ''
+    let settled = false
+    const finish = (fn, value) => {
+      if (settled) return
+      settled = true
+      fn(value)
+    }
+    const timer = setTimeout(() => {
+      try {
+        child.kill()
+      } catch {
+        /* ignore */
+      }
+      finish(reject, new Error('Python 识别超时'))
+    }, timeoutMs)
+    child.stdout.on('data', (chunk) => {
+      out += chunk.toString()
+    })
+    child.stderr.on('data', (chunk) => {
+      err += chunk.toString()
+    })
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      finish(reject, error)
+    })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      if (code !== 0) {
+        finish(reject, new Error(err.trim() || `Python 退出码 ${code}`))
+        return
+      }
+      try {
+        finish(resolve, JSON.parse(out))
+      } catch {
+        finish(reject, new Error('Python 返回的 JSON 无效'))
+      }
+    })
+  })
+}
+
+function roundBox(value) {
+  return Math.round(Math.min(1, Math.max(0, value)) * 10000) / 10000
+}
+
+/** Segment the staged image with Python + OpenCV (falls back inside the script). */
+function detectLocalHandler(runtime) {
+  return async (request, response) => {
+    if (rejected(runtime.ctx, request, response)) return
+    try {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { ok: false, error: '只支持 POST' })
+        return
+      }
+      const config = await store.readConfig()
+      if (!config.libraryPath) {
+        sendJson(response, 400, { ok: false, error: '还没有设置素材库路径' })
+        return
+      }
+      if (!config.enabled) {
+        sendJson(response, 400, { ok: false, error: '素材库已禁用，无法识别' })
+        return
+      }
+      const body = await readJson(request)
+      if (!body || typeof body.stageId !== 'string') {
+        sendJson(response, 400, { ok: false, error: '缺少暂存 id' })
+        return
+      }
+      const { dir, meta } = await readStage(config.libraryPath, body.stageId)
+      const source = path.join(dir, `source${meta.extension}`)
+      const python = await resolvePython(runtime)
+      if (!python) {
+        sendJson(response, 500, {
+          ok: false,
+          error: '没有找到可用的 Python（需要 numpy 和 Pillow；装了 OpenCV 效果最好）',
+        })
+        return
+      }
+      const result = await runSegment(python, source, MAX_OBJECTS)
+      const width = Number(result.width) || Number(meta.width) || 1
+      const height = Number(result.height) || Number(meta.height) || 1
+      const raw = Array.isArray(result.boxes) ? result.boxes : []
+      const objects = raw
+        .slice(0, MAX_OBJECTS)
+        .filter((box) => Array.isArray(box) && box.length === 4 && Number(box[2]) > 2 && Number(box[3]) > 2)
+        .map((box, index) => ({
+          label: `对象 ${index + 1}`,
+          bbox: [
+            roundBox(Number(box[0]) / width),
+            roundBox(Number(box[1]) / height),
+            roundBox(Number(box[2]) / width),
+            roundBox(Number(box[3]) / height),
+          ],
+        }))
+      sendJson(response, 200, {
+        ok: true,
+        engine: result.engine || 'python',
+        count: objects.length,
+        objects,
+      })
+    } catch (error) {
+      sendJson(response, 500, { ok: false, error: `Python 识别失败：${errorMessage(error)}` })
     }
   }
 }
@@ -1279,6 +1464,7 @@ function registerRoutes(runtime) {
         { path: `${ROUTE}/config`, handler: configHandler(runtime) },
         { path: `${ROUTE}/stage`, handler: stageHandler(runtime) },
         { path: `${ROUTE}/detect`, handler: detectHandler(runtime) },
+        { path: `${ROUTE}/detect-local`, handler: detectLocalHandler(runtime) },
         { path: `${ROUTE}/describe`, handler: describeHandler(runtime) },
         { path: `${ROUTE}/commit`, handler: commitHandler(runtime) },
         { path: `${ROUTE}/discard`, handler: discardHandler(runtime) },

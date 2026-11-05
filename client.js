@@ -51,11 +51,13 @@ window.__ModuleLoader__.load({
         distTitle: '分类分布',
         libraryInfo: '素材库信息',
         detectorLabel: '对象识别',
-        detectorLocal: '本地识别（不耗模型，立即出框）',
+        detectorPython: 'Python 识别（OpenCV，推荐；几百个对象也能切）',
+        detectorLocal: '浏览器识别（无依赖，慢一些）',
         detectorModel: '视觉模型找框',
         detectorHint: '本地识别直接分析像素：剥离背景色、合并碎块后自动框出主体，不依赖模型；模型只负责命名和注释。',
         detectorSaved: '识别方式已更新',
         modelFallback: 'AI 找框失败，已改用本地识别：',
+        pythonFallback: 'Python 识别失败，已改用浏览器识别：',
         localFailed: '本地识别失败：',
         nameFailedHint: '（切图已保留，可手动改名后入库）',
         modelLabel: '分析模型',
@@ -219,11 +221,13 @@ window.__ModuleLoader__.load({
         distTitle: 'Distribution',
         libraryInfo: 'Library info',
         detectorLabel: 'Object detection',
-        detectorLocal: 'Local (no model, instant boxes)',
+        detectorPython: 'Python (OpenCV; handles hundreds of objects)',
+        detectorLocal: 'Browser (no dependency, slower)',
         detectorModel: 'Vision model boxes',
         detectorHint: 'Local detection reads pixels directly: removes the border colour, merges fragments and frames each subject. No model needed; the model only names and annotates.',
         detectorSaved: 'Detection mode updated',
         modelFallback: 'Vision detection failed, fell back to local:',
+        pythonFallback: 'Python detection failed, fell back to the browser:',
         localFailed: 'Local detection failed:',
         nameFailedHint: ' (pieces are kept; rename them and save)',
         modelLabel: 'Vision model',
@@ -1916,12 +1920,24 @@ window.__ModuleLoader__.load({
          crops happen immediately and naming is a separate pass. */
       function detectAndCrop(key, entry) {
         patchEntry(key, { status: 'detecting', error: '', warning: '', pieces: [], progress: '' })
-        var useModel = props.detector === 'model'
+        var detector = props.detector || 'python'
+        var useModel = detector === 'model'
+        var usePython = detector === 'python'
         var progress = function (done, total) {
           patchEntry(key, { progress: done + '/' + total })
         }
         var boxesPromise
-        if (useModel) {
+        if (usePython) {
+          boxesPromise = postJson('/detect-local', { stageId: entry.stageId })
+            .then(function (result) {
+              return { objects: result.objects || [], engine: result.engine }
+            })
+            .catch(function (error) {
+              return localDetect(entry.url, progress).then(function (objects) {
+                return { objects: objects, warning: t.pythonFallback + ' ' + failure(error) }
+              })
+            })
+        } else if (useModel) {
           boxesPromise = postJson('/detect', { stageId: entry.stageId })
             .then(function (result) {
               return { objects: result.objects || [], title: result.title, model: result.model }
@@ -3781,11 +3797,12 @@ window.__ModuleLoader__.load({
                     'select',
                     {
                       className: 'al-input al-select',
-                      value: snapshot.detector || 'local',
+                      value: snapshot.detector || 'python',
                       onChange: function (event) {
                         saveDetector(event.target.value)
                       },
                     },
+                    h('option', { value: 'python' }, t.detectorPython),
                     h('option', { value: 'local' }, t.detectorLocal),
                     h('option', { value: 'model' }, t.detectorModel),
                   ),
@@ -3901,7 +3918,7 @@ window.__ModuleLoader__.load({
                 queue: queue,
                 setQueue: setQueue,
                 snapshot: snapshot,
-                detector: snapshot.detector || 'local',
+                detector: snapshot.detector || 'python',
                 autoAnalyze: autoAnalyze,
                 setAutoAnalyze: setAutoAnalyze,
                 notify: notify,

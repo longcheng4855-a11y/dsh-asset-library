@@ -11,7 +11,8 @@
   3. **停下来等你检查**：框多了删掉、框少了补框、重新框选，都确认无误后再点「AI 识别并命名」；
   4. 视觉模型逐张命名、定分类、打标签、写注释；
   5. 你确认（或手动改）后才写进素材库；关掉卡片或删掉暂存不会留下垃圾素材。
-- **本地对象识别（分区块）**：仪表盘「对象识别」可选「本地识别」或「视觉模型找框」。本地识别在浏览器里直接读像素：大图会切成互相重叠的小块分别识别，再把跨块的同一个对象拼回一个框；以边框颜色为背景参考做前景掩膜、闭运算合并碎块、连通域求外接框。不调用模型、不依赖 Python/OpenCV，**单图最多 1000 个切图**，适合立绘/角色表/密集精灵表；照片类图片可切到「视觉模型找框」。
+- **Python 对象识别（默认，推荐）**：仪表盘「对象识别」默认选 **Python**。插件调用 `lib/segment.py`：装了 OpenCV 时用轮廓（`findContours`）找框，没有 OpenCV 时自动退回网格投影/连通域；透明背景、纯色背景都能处理，**实测 500 个对象的精灵表 0.4 秒切完**。需要本机有 Python（numpy + Pillow，OpenCV 可选；可用环境变量 `DSH_ASSET_PYTHON` 指定解释器）。找不到 Python 会自动改用浏览器识别。
+- **浏览器对象识别（兜底）**：没有 Python 时在浏览器里直接读像素：大图切成互相重叠的小块分别识别，再把跨块的同一个对象拼回一个框。不调用模型、不依赖任何运行时，**单图最多 1000 个切图**；照片类图片可切到「视觉模型找框」。
 - **模型只负责命名**：即使视觉模型不可用，切图仍然会被裁好，可以手动改名后入库；命名失败时卡片会保留切图并提示原因。切图很多时每次 AI 命名处理前 120 个（每批 8 张），其余保留编号可手动改名。
 - **框选放大与微调**：卡片右侧「放大框选」或双击图片，会打开接近全屏的框选窗口（最高 74vh）；在图上拖矩形新增切图，已有的框可以**拖动移动**、拖右下角**缩放**，松手后自动重新裁剪。
 - **分割**：自动裁剪之外，也可以手动拖框；单图最多 1000 个切图（密集表按区块识别后拼接）。
@@ -56,7 +57,7 @@ asset_library {action:"export", ids:["ast_xxx","ast_yyy"], destination:"D:\\MyGa
 - **从链接安装（推荐，不需要安装 git）**：在 Harness 插件管理的「从链接安装 / 添加插件」里粘贴：
 
   ```text
-  https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.8.0.tar.gz
+  https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.0.tar.gz
   ```
 
   这是仓库的源码压缩包地址，pnpm 直接 HTTPS 下载解包，不调用 `git`。如果粘贴 `git+https://...` 或仓库地址而机器上没装 git，会报 `git ls-remote failed: 'git' 不是内部或外部命令`。
@@ -72,7 +73,7 @@ asset_library {action:"export", ids:["ast_xxx","ast_yyy"], destination:"D:\\MyGa
 command: npx
 args:
   - '-y'
-  - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.8.0.tar.gz'
+  - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.0.tar.gz'
   - 'dsh-asset-library-mcp'
 ```
 
