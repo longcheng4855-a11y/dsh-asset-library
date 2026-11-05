@@ -1,0 +1,51 @@
+{
+  "name": "dsh-asset-library",
+  "version": "0.6.0",
+  "description": "Asset library for DeepSeek Harness: drop or paste images, crop objects locally or with a vision model, let the model name and classify the crops, browse them in a category tree, and let the agent search, read and export the material into Godot / Unity / web projects.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek-harness-plugin",
+    "asset-library",
+    "sprite",
+    "segmentation",
+    "mcp",
+    "godot",
+    "unity"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "mcp-server.js",
+    "lib/*.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test/smoke-host.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  }
+}

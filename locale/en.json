@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "title": "Asset Library",
+    "description": "Import images by drop or paste, let a vision model name and split the objects, browse them in a shallow category tree, and let the agent search and read the material in projects."
+  },
+  "panel": {
+    "title": "Asset Library"
+  }
+}

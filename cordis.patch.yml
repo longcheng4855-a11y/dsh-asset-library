@@ -1,0 +1,18 @@
+- insert:
+    - id: asset-library
+      name: dsh-asset-library
+    - id: asset-library-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        transport: stdio
+        serverName: assetlib
+        command: node
+        args:
+          - 'C:/Users/uersA/Desktop/plug-ins/zichanguanli/mcp-server.js'
+        toolCallTimeoutMs: 30000
+        failOnStartupError: false
+        reconnect:
+          enabled: true
+          initialDelayMs: 1500
+          maxDelayMs: 30000
+          maxAttempts: 5
