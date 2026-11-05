@@ -62,6 +62,7 @@ window.__ModuleLoader__.load({
         regenerateBatch: '重新生成这一批',
         namedRange: '已命名 {start}–{end} / 共 {total} 个',
         timeout: '请求超时（素材很多或后端忙），请点重试',
+        networkError: '无法连接 Harness 后端：页面可能停在旧端口。请按 Ctrl+R 刷新，或重新打开应用。',
         pythonChecking: '正在检测 Python…',
         pythonSetup: '创建 Python 环境',
         pythonSetupConfirm: '会在 Harness 数据目录下创建一个独立 Python 环境（不影响系统）：联网下载 numpy、Pillow；选完整安装时再装 OpenCV。约 60–80MB，1–3 分钟。',
@@ -249,6 +250,7 @@ window.__ModuleLoader__.load({
         regenerateBatch: 'Regenerate this batch',
         namedRange: 'Named {start}–{end} of {total}',
         timeout: 'Request timed out (large library or busy host); press Retry',
+        networkError: 'Cannot reach the Harness backend: the page may be on an old port. Press Ctrl+R, or reopen the app.',
         pythonChecking: 'Checking Python…',
         pythonSetup: 'Create Python env',
         pythonSetupConfirm: 'Creates a private Python environment under the Harness data folder (your system Python stays untouched): downloads numpy and Pillow, plus OpenCV for the full install. About 60–80MB, 1–3 minutes.',
@@ -581,6 +583,12 @@ window.__ModuleLoader__.load({
 
     function messageOf(lang) {
       return MESSAGES[lang] || MESSAGES.zh
+    }
+
+    function isNetworkError(reason) {
+      var text = String((reason && reason.message) || reason)
+      if (reason && reason.name === 'TypeError') return true
+      return /failed to fetch|networkerror|load failed|network request failed/i.test(text)
     }
 
     async function request(path, options, timeoutMs) {
@@ -3526,22 +3534,35 @@ window.__ModuleLoader__.load({
       var setSetupConfirm = confirmState[1]
 
       var refresh = React.useCallback(function () {
-        return request('/state', undefined, 12000)
-          .then(function (next) {
-            setSnapshot(next)
-            setError('')
-            return next
-          })
-          .catch(function (reason) {
-            var text = String((reason && reason.message) || reason)
-            if (reason && (reason.name === 'AbortError' || /abort/i.test(text))) text = t.timeout
-            setError(text)
-            return null
-          })
-          .then(function (result) {
-            setLoading(false)
-            return result
-          })
+        function describe(reason) {
+          var text = String((reason && reason.message) || reason)
+          if (reason && reason.name === 'AbortError') return t.timeout
+          if (isNetworkError(reason)) return t.networkError
+          return text
+        }
+        function run(left) {
+          return request('/state', undefined, 12000)
+            .then(function (next) {
+              setSnapshot(next)
+              setError('')
+              return next
+            })
+            .catch(function (reason) {
+              if (left > 0 && isNetworkError(reason)) {
+                return new Promise(function (resolve) {
+                  setTimeout(resolve, 700)
+                }).then(function () {
+                  return run(left - 1)
+                })
+              }
+              setError(describe(reason))
+              return null
+            })
+        }
+        return run(3).then(function (result) {
+          setLoading(false)
+          return result
+        })
       }, [])
 
       React.useEffect(

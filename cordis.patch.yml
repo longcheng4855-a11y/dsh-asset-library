@@ -20,7 +20,7 @@
         command: npx
         args:
           - '-y'
-          - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.5.tar.gz'
+          - 'https://github.com/longcheng4855-a11y/dsh-asset-library/archive/refs/tags/v0.9.6.tar.gz'
           - 'dsh-asset-library-mcp'
         toolCallTimeoutMs: 30000
         failOnStartupError: false
